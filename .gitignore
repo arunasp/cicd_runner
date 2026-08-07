@@ -1,0 +1,10 @@
+# Real host paths -- instance-specific, never committed. See
+# .env.example for the template.
+.env
+
+# Windows Zone.Identifier alternate-data-stream metadata
+*:Zone.Identifier
+
+# Python
+__pycache__/
+*.pyc

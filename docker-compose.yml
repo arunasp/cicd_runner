@@ -1,0 +1,42 @@
+# Do NOT run `docker compose`/`docker-compose` directly against this
+# file without checking start.sh first for the same reason as
+# LocusAI's own docker-compose.yml: recreating an existing container
+# in place can hit docker-compose v1's `KeyError: 'ContainerConfig'`
+# bug (docker/compose#11742) after a rebuild. Prefer start.sh (once
+# it exists here) or `docker compose build && docker compose up -d`
+# with an explicit `docker compose rm -sf` first.
+services:
+  cicd-runner:
+    build: ./server
+    image: cicd-runner
+    command: ["python3", "/app/bash_mcp_server.py"]
+    environment:
+      MCP_PORT: "1444"
+      CICD_TIMEOUT_SECONDS: "300"
+    ports:
+      # 1444, not LocusAI's 1443 -- avoids a port collision if both
+      # containers run on the same host at once (same reasoning
+      # already applied between LocusAI and Axiom's own separate
+      # opencode serve instance, see opencode-model-eval notes).
+      # Bound to 127.0.0.1 explicitly, matching LocusAI's own
+      # reasoning: WSL2's localhost-forwarding already keeps this off
+      # the LAN by default, but binding explicitly is the correct
+      # belt-and-braces choice rather than relying on that alone.
+      - "127.0.0.1:1444:1444"
+    volumes:
+      # The one place this project's whole reason to exist lives: real
+      # access to the HOST's docker daemon, not a nested one. This is
+      # what lets it run `docker compose build/up` for a PROJECT's own
+      # services without that project's own container trying (and
+      # structurally failing) to rebuild itself.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # One mount per project, each its own named subdirectory under
+      # /projects -- see bash_mcp_server.py's project-selector logic.
+      # Paths come from .env (gitignored, host-specific -- see
+      # .env.example for the expected keys), not hardcoded here, since
+      # this file is meant to be portable across whichever host it
+      # runs on.
+      - ${LOCUSAI_DIR}:/projects/LocusAI
+      - ${OPENCODE_MODEL_EVAL_DIR}:/projects/opencode-model-eval
+      - ${OPENCODE_CTX_SQUID_DIR}:/projects/opencode-plugin-ctx-squid
+    restart: unless-stopped
