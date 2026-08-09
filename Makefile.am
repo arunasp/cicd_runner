@@ -51,7 +51,7 @@ COMPOSE = @COMPOSE_CMD@
 # $(srcdir)/$(abs_srcdir) (which resolve fine either way, since most
 # recipes use the RELATIVE $(srcdir)="."), but the derived
 # ACLOCAL/AUTOCONF/AUTOMAKE/AUTOHEADER/MAKEINFO variables
-# specifically, e.g. `${SHELL} '/home/arunasp/stuff/cicd_runner/
+# specifically, e.g. `${SHELL} '/home/devuser/stuff/cicd_runner/
 # missing' automake-1.16`. This repo mounts itself into the
 # coordinator at a DIFFERENT absolute path (/projects/cicd_runner)
 # than wherever it actually lives on the real host -- so those baked
