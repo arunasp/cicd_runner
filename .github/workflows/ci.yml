@@ -43,9 +43,89 @@ jobs:
       - name: Build the .mcpb bundle
         run: ./desktop-extension/build.sh
 
+      # Uploaded so tag-release can attach it to the GitHub Release
+      # without rebuilding -- artifacts don't cross jobs by default.
+      - name: Upload .mcpb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-extension-mcpb
+          path: desktop-extension/dist/*.mcpb
+
   docker-compose-syntax:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Validate docker-compose.yml
         run: docker compose -f docker-compose.yml config
+
+  # Tags and releases automatically on a version bump to
+  # configure.ac's own AC_INIT -- the same single source of truth
+  # `make dist`/`make install` already use, not a separate
+  # release-specific version file. Deliberately only runs on a real
+  # push to main (never on a PR, and never before the other three
+  # jobs above have already passed via `needs:` -- a broken build is
+  # never tagged or released). Bump the version by editing
+  # configure.ac's own AC_INIT line and pushing to main; nothing else
+  # to remember or run by hand.
+  #
+  # Standard, established pattern (tag-on-version-bump), not an
+  # invented one -- matches this project's own "Makefile as CI/CD
+  # manifest" philosophy of following FOSS convention rather than a
+  # bespoke mechanism. softprops/action-gh-release is the de facto
+  # standard action for this exact step across the GitHub Actions
+  # ecosystem.
+  tag-release:
+    needs: [autotools, desktop-extension, docker-compose-syntax]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history -- need every existing tag to check against
+
+      - name: Extract version from configure.ac
+        id: version
+        run: |
+          version=$(grep -oP "AC_INIT\(\[cicd-runner\], \[\K[^]]+" configure.ac)
+          if [ -z "$version" ]; then
+            echo "Could not extract version from configure.ac's AC_INIT line" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version is already tagged
+        id: check
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the dist tarball
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          sudo apt-get update && sudo apt-get install -y autoconf automake
+          python3 -m pip install -r server/requirements.txt
+          ./autogen.sh
+          ./configure
+          make dist
+
+      - name: Download the .mcpb artifact
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-extension-mcpb
+          path: desktop-extension/dist/
+
+      - name: Tag and create the release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            cicd-runner-${{ steps.version.outputs.version }}.tar.gz
+            desktop-extension/dist/*.mcpb

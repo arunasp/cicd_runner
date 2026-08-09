@@ -632,6 +632,15 @@ aren't committed — `autogen.sh` regenerates them from `configure.ac`/
 `Makefile.am` on a fresh checkout; a release tarball (`make dist`)
 already includes them.
 
+**Releases are automatic, not a manual step.** CI (`.github/workflows/
+ci.yml`'s `tag-release` job) watches `configure.ac`'s own `AC_INIT`
+version on every push to `main`: once the other jobs pass and that
+version isn't already tagged, it tags `v<version>`, builds `make
+dist`'s tarball and the Desktop `.mcpb`, and publishes both to a new
+GitHub Release with auto-generated notes. Bumping the version is the
+entire release process — edit `AC_INIT([cicd-runner], [x.y.z], ...)`
+and push to `main`; nothing else to run by hand.
+
 ## Build script
 
 ```bash
