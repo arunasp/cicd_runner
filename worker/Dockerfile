@@ -39,6 +39,15 @@ FROM python:3.12-slim
 # almost certainly already present on this base image, but installed
 # explicitly rather than assumed -- cheap, and guarantees correctness
 # regardless of what this or a future base image strips out.
+# bash, autoconf, automake (added 2026-08-09, per Arunas's own
+# explicit direction that Autotools regeneration belongs on the
+# worker side, not the coordinator's -- see server/allowlist-worker.txt
+# for the full reasoning). bash is what actually lets a checked-in
+# ./autogen.sh/./configure run at all; almost certainly already
+# present on this base image (bash is a Debian Essential package) but
+# installed explicitly rather than assumed, same discipline as
+# util-linux above. autoconf/automake provide aclocal/autoheader/
+# automake/autoconf for the regeneration chain itself.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         openssh-client \
@@ -49,6 +58,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         libc6-dev \
         util-linux \
+        bash \
+        autoconf \
+        automake \
     && rm -rf /var/lib/apt/lists/*
 
 # gh CLI, official repo per current docs -- same pattern as the

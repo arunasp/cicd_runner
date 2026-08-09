@@ -183,7 +183,16 @@ ALLOWED_DIRECTORIES_HEADER = "X-Allowed-Directories"
 TIMEOUT_SECONDS = int(os.environ.get("CICD_TIMEOUT_SECONDS", "300"))
 DOCKER_SOCKET_PATH = Path("/var/run/docker.sock")
 
-ALLOWED_BINARIES = FileAllowlist(Path("/app/allowlist.txt"))
+ALLOWED_BINARIES_COORDINATOR = FileAllowlist(Path("/app/allowlist.txt"))
+ALLOWED_BINARIES_WORKER = FileAllowlist(Path("/app/allowlist-worker.txt"))
+# Two separate lists, added 2026-08-09 (previously one shared list
+# gated both tools -- see allowlist.txt's own header for why that was
+# wrong: it meant anything added for a worker-only need was also
+# automatically granted to the coordinator, the one container holding
+# docker-socket/root-equivalent host access). run_command() enforces
+# against ALLOWED_BINARIES_COORDINATOR; run_in_directory() enforces
+# against ALLOWED_BINARIES_WORKER. Neither list implies anything about
+# the other.
 
 mcp = FastMCP(
     "cicd-runner",
@@ -683,7 +692,7 @@ def run_command(project: str, binary: str, args: list[str]) -> str:
     project_dir = _resolve_project_dir(project)
     if project_dir is None:
         return f"REFUSED: '{project}' is not a mounted project directory"
-    return run_allowlisted(binary, args, ALLOWED_BINARIES, project_dir, TIMEOUT_SECONDS)
+    return run_allowlisted(binary, args, ALLOWED_BINARIES_COORDINATOR, project_dir, TIMEOUT_SECONDS)
 
 
 @mcp.tool()
@@ -709,8 +718,8 @@ async def run_in_directory(relative_path: str, binary: str, args: list[str], ctx
     """
     if not DYNAMIC_ROOT_HOST:
         return "REFUSED: DYNAMIC_ROOT_HOST is not configured (see docker-compose.yml)"
-    if binary not in ALLOWED_BINARIES:
-        return f"REFUSED: '{binary}' is not in the allowlist {sorted(ALLOWED_BINARIES)}"
+    if binary not in ALLOWED_BINARIES_WORKER:
+        return f"REFUSED: '{binary}' is not in the worker allowlist {sorted(ALLOWED_BINARIES_WORKER)}"
 
     validated = _resolve_dynamic_dir(relative_path)
     if validated is None:

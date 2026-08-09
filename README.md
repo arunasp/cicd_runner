@@ -279,8 +279,10 @@ One `docker run --rm` per call, then discarded.
 **`server/lib/common.py`** — shared allowlist and subprocess-execution
 helpers.
 
-**`server/allowlist.txt`** — one list gating both tools; see
-[Design decisions](#design-decisions).
+**`server/allowlist.txt`** — the coordinator's own list, for
+`run_command()`. **`server/allowlist-worker.txt`** — a separate,
+wider list for `run_in_directory()`'s worker containers; see [Design
+decisions](#design-decisions).
 
 ## The Makefile as CI/CD manifest
 
@@ -388,10 +390,11 @@ run_command(project="my-project", binary="make", args=["build"])
 run_command(project="my-project", binary="make", args=["all"])
 ```
 
-`make` — not `bash` — is what's allowlisted here: it runs a project's
-own version-controlled recipes, a structured and auditable entry
-point, rather than letting a call hand `run_command` an arbitrary
-shell string.
+`make` is what's allowlisted for `run_command()` (the coordinator): it
+runs a project's own version-controlled recipes, a structured and
+auditable entry point, rather than letting a call hand `run_command`
+an arbitrary shell string. `run_in_directory()`'s own worker allowlist
+is wider — see [Design decisions](#design-decisions).
 
 Run something against a directory that isn't pre-mounted, in a
 disposable worker:
@@ -641,6 +644,22 @@ GitHub Release with auto-generated notes. Bumping the version is the
 entire release process — edit `AC_INIT([cicd-runner], [x.y.z], ...)`
 and push to `main`; nothing else to run by hand.
 
+**Running `./autogen.sh`/`./configure` through cicd-runner itself,
+not just a host shell:** `run_command()` (the coordinator) can't run
+these — they're shell scripts, and `bash` is deliberately not on the
+coordinator's own allowlist (see [Design decisions](#design-decisions)).
+`run_in_directory()`'s worker allowlist includes `bash`/`autoconf`/
+`automake` specifically so this repo's own regeneration chain can run
+there instead, against this checkout under `DYNAMIC_ROOT`:
+
+```
+run_in_directory(relative_path="cicd_runner", binary="bash", args=["autogen.sh"])
+run_in_directory(relative_path="cicd_runner", binary="bash", args=["-c", "./configure"])
+```
+
+A real host shell is still the more direct path for day-to-day use;
+this exists so the regeneration itself doesn't strictly require one.
+
 ## Build script
 
 ```bash
@@ -719,9 +738,20 @@ images. At most one resolves in any given context. If neither does,
   A worker with its own docker access could do anything the
   coordinator can, defeating per-call isolation. Allowlist enforcement
   happens once, in the coordinator, before a worker starts.
-- **One shared `allowlist.txt` gates both tools.** `docker` being
-  allowlisted already sets the container's privilege ceiling; every
-  other entry is narrower than that.
+- **Two separate allowlists, not one shared list.** `run_command()`
+  (the coordinator, which holds `/var/run/docker.sock` — root-
+  equivalent host access) enforces against `server/allowlist.txt`.
+  `run_in_directory()` (the ephemeral, no-docker-CLI worker) enforces
+  against a separate, wider `server/allowlist-worker.txt` — the two
+  checks are independent in code (`bash_mcp_server.py`'s own two
+  `FileAllowlist` instances), not just two files read into one set.
+  A capability added for the worker (e.g. `bash`, for a project's own
+  Autotools regeneration) does not carry over to the coordinator.
+  Originally one shared list gated both tools; split 2026-08-09 once
+  a real worker-only need (`bash`) surfaced and would otherwise have
+  had to be granted to the coordinator too, undermining the same
+  least-privilege logic already applied to `docker` itself (the
+  worker deliberately has none, see the point above).
 - **No SSH keys or git credentials are mounted here.** Projects that
   need `git push` keep that capability in their own container, scoped
   to that one repo. Applies to this project's own repo too —
@@ -753,8 +783,6 @@ restart.
 
 **Open decisions:**
 
-- Whether to allowlist `bash` directly, rather than relying on `make`
-  as the structured entry point into a project's pipeline.
 - No auto-generated starter `opencode.json` for new projects adopting
   [Directory ACLs](#directory-acls).
 

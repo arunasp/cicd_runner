@@ -8,18 +8,6 @@ FROM python:3.12-slim
 # genuinely failing with 'cc: No such file or directory' through
 # run_command before this; explicit, not relying on gcc's own Recommends
 # to pull libc6-dev, since --no-install-recommends below skips those).
-# autoconf + automake (added 2026-08-09, per Arunas's own explicit
-# request) -- provides autoconf/autoheader/autoreconf (autoconf
-# package) and automake/aclocal (automake package), needed so this
-# project's own Autotools regeneration chain (autogen.sh's own
-# aclocal/autoheader/automake/autoconf sequence) can run through
-# run_command() against this repo's own self-mount, rather than
-# needing a host shell for every step. Narrower than docker, same as
-# every other entry here -- does NOT by itself let ./configure run
-# (that's still a generated SHELL script needing bash/sh execution,
-# deliberately not added here -- a materially bigger decision than
-# adding these two specific binaries, left for Arunas to decide
-# explicitly rather than bundled in silently).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         openssh-client \
@@ -29,8 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         gcc \
         libc6-dev \
-        autoconf \
-        automake \
     && rm -rf /var/lib/apt/lists/*
 
 # Real bug found live 2026-08-08: this container runs as root by
@@ -96,6 +82,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY lib/ lib/
 COPY allowlist.txt .
+COPY allowlist-worker.txt .
 COPY bash_mcp_server.py .
 
 # Shared, reusable Makefile fragment (self-documenting `help` target)
