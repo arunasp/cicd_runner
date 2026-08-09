@@ -24,7 +24,17 @@ jobs:
         run: python3 -m pip install -r server/requirements.txt
 
       - name: Build and check
+        # make check depends on `all` (-> all-local -> ./build.sh ->
+        # docker compose build for the coordinator stage), which needs
+        # the same placeholder env vars as the docker-compose-syntax
+        # job below -- LOCUSAI_DIR/OPENCODE_MODEL_EVAL_DIR/
+        # OPENCODE_CTX_SQUID_DIR are the only three vars in
+        # docker-compose.yml with no ${VAR:-} fallback, and CI has no
+        # .env (gitignored, never committed).
         run: |
+          export LOCUSAI_DIR=/tmp/placeholder
+          export OPENCODE_MODEL_EVAL_DIR=/tmp/placeholder
+          export OPENCODE_CTX_SQUID_DIR=/tmp/placeholder
           ./autogen.sh
           ./configure
           make
