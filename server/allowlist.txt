@@ -55,3 +55,19 @@ shellcheck
 # worker, and there's no way to know in advance which path a given
 # project's Makefile will be invoked through.
 make
+
+# autoconf, automake: added 2026-08-09, per Arunas's own explicit
+# request -- lets this project's own Autotools regeneration chain
+# (aclocal/autoheader/automake/autoconf, what autogen.sh runs) execute
+# through run_command() against cicd-runner's own self-mount, instead
+# of needing a host shell for every step. Installed in the
+# COORDINATOR image only so far (see Dockerfile) -- not added to the
+# worker image, since the immediate need is this project's own named-
+# project mount (run_command), not an arbitrary run_in_directory()
+# target; add to worker/Dockerfile too if a different project ever
+# needs this same regeneration path. Does NOT by itself let
+# ./configure run (a generated shell script needing bash/sh execution,
+# deliberately not requested/added here).
+autoconf
+automake
+
