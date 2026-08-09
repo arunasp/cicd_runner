@@ -44,7 +44,7 @@ all-local:
 # extension, and doing it once at configure time is cheaper anyway.
 COMPOSE = @COMPOSE_CMD@
 
-.PHONY: help build build-extension build-all start stop restart logs status
+.PHONY: help build build-extension build-all start stop restart logs status health-check
 
 help:
 	@echo "Autotools-standard targets: check install uninstall dist clean"
@@ -57,6 +57,7 @@ help:
 	@echo "  restart         - stop, then start"
 	@echo "  logs            - follow the coordinator's logs"
 	@echo "  status          - show container status"
+	@echo "  health-check    - check coordinator health (see health-check's own comment)"
 
 build:
 	./build.sh
@@ -79,6 +80,58 @@ logs:
 
 status:
 	$(COMPOSE) ps
+
+# `make health-check` -- run via run_command(project="cicd_runner",
+# binary="make", args=["health-check"]) so this project can
+# self-verify its own coordinator's health through its own pipeline,
+# per Arunas's own request (2026-08-09, closing the CVV#15
+# self-verification gap raised earlier the same session).
+#
+# Deliberately does NOT curl/http-request localhost:1444/health --
+# doing so from inside a run_command() call is a REAL, confirmed
+# self-deadlock, not a hypothetical risk: FastMCP's own tool dispatch
+# (mcp/server/fastmcp/tools/base.py's call_fn_with_arg_validation)
+# invokes a SYNCHRONOUS @mcp.tool() function like run_command()
+# directly on the coordinator's single asyncio event loop --
+# `return fn(**args)`, not wrapped in a thread pool/executor. Since
+# run_command()'s own subprocess.run() then blocks that SAME event
+# loop for its entire duration, a child process spawned from inside
+# it that tries to reach the coordinator's own HTTP server can never
+# get a response -- the one thread that could serve it is the one
+# blocked waiting for the child, and a server-side subprocess.run()
+# is not cancelled by the client giving up, so this hangs
+# indefinitely rather than erroring quickly. Confirmed live 2026-08-09:
+# a plain `python3 -c "...urlopen('http://localhost:1444/health')..."`
+# run via run_command() hung 4+ minutes and very likely left the
+# coordinator's own event loop wedged until manually restarted.
+#
+# Instead, this checks the exact same underlying conditions
+# bash_mcp_server.py's own health_check() checks, directly -- no HTTP
+# round-trip back into the same process, so no deadlock is possible.
+# Kept in sync BY HAND with health_check()'s own logic (not
+# generated from it) -- if that function's checks change, update
+# this target to match. Written as separate `var=$$(...)` assignments
+# joined by `; \` rather than nesting `test -n "$$VAR"` directly
+# inside an echo's own outer double-quoted string -- a real, tested
+# bug found in this target's own first draft: the escaped `\"..\"`
+# needed to nest inside that outer string does NOT get stripped by
+# the shell the way plain `".."` would; the literal backslash-quote
+# characters survive into the string being tested, so `test -n` sees
+# two literal quote characters even when the variable itself is
+# genuinely empty, and incorrectly reports true unconditionally.
+# Confirmed via a real, isolated `set -x` trace before writing this
+# fixed version, not just reasoned about -- and re-verified across
+# all three real states (nothing configured, env vars set but no
+# socket, a genuine socket present) before committing.
+health-check:
+	@docker_ok=$$(test -S /var/run/docker.sock && echo true || echo false); \
+	dyn_ok=$$(test -n "$$DYNAMIC_ROOT_HOST" && echo true || echo false); \
+	cache_ok=$$(test -n "$$CACHE_ROOT_HOST" && echo true || echo false); \
+	echo "docker_socket: $$docker_ok"; \
+	echo "dynamic_root_configured: $$dyn_ok"; \
+	echo "cache_root_configured: $$cache_ok"; \
+	test -S /var/run/docker.sock || { echo "UNHEALTHY: docker socket missing" >&2; exit 1; }; \
+	echo "OK"
 
 # `make check` -- the real, committed pytest suite
 # (server/test_bash_mcp_server.py, covering path-resolution,

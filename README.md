@@ -416,23 +416,24 @@ image:
 
 ```
 # .cicd-image
-rust:1.82-bookworm
+rust:1.97-bookworm
 ```
 
 ```
 run_in_directory(relative_path="my-rust-project", binary="cargo", args=["test"])
 ```
 
-Common choices:
+Common choices (versions current as of August 2026 -- check each
+language's own release page before pinning, since these move):
 
 | Language | Suggested image |
 |---|---|
-| C / C++ | `gcc:13-bookworm` |
-| Rust | `rust:1.82-bookworm` |
-| Go | `golang:1.23-bookworm` |
-| Java | `eclipse-temurin:21-jdk` |
-| .NET | `mcr.microsoft.com/dotnet/sdk:8.0` |
-| Ruby | `ruby:3.3-bookworm` |
+| C / C++ | `gcc:16-bookworm` |
+| Rust | `rust:1.97-bookworm` |
+| Go | `golang:1.26-bookworm` |
+| Java | `eclipse-temurin:25-jdk` |
+| .NET | `mcr.microsoft.com/dotnet/sdk:10.0` |
+| Ruby | `ruby:4.0-bookworm` |
 
 Only the first line of `.cicd-image` is read; later lines can hold a
 comment. A present-but-empty or unreadable file is refused rather than
