@@ -9,10 +9,28 @@ PREFIX ?= /usr/local
 
 .PHONY: lint test build deploy verify e2e all
 
+# The dependency-resolution step this project family's own design
+# principle calls for (see ../../README.md's "Dependency caching"):
+# a per-project requirements.txt plus a step that installs it, which
+# lands in CACHE_ROOT_HOST's own pip cache (via PIP_CACHE_DIR) and is
+# cheap on every later run -- not a workaround, the intended
+# mechanism. .deps is a sentinel file (pip has no single well-known
+# install directory like npm's node_modules to check timestamps
+# against), matching hello-typescript's own node_modules: target
+# pattern -- only re-runs pip install when requirements.txt actually
+# changes. Deliberately NOT in .PHONY, same real bug/fix as
+# hello-typescript's own node_modules target -- a .PHONY listing
+# would force pip install to re-run on every single invocation
+# regardless of whether requirements.txt had actually changed.
+.deps: requirements.txt ## Install dependencies (pytest, ruff)
+	$(PYTHON3) -m pip install -r requirements.txt
+	@touch .deps
+
 # ruff is preferred when available (fast, real static analysis);
-# falls back to py_compile (syntax-only) so this example still works
-# on a minimal Python install with nothing else added.
-lint: ## Static checks (ruff, falls back to py_compile)
+# falls back to py_compile (syntax-only) as a belt-and-braces safety
+# net if .deps somehow wasn't run or failed silently -- not the
+# primary path anymore now that .deps installs it explicitly.
+lint: .deps ## Static checks (ruff, falls back to py_compile)
 	@if command -v ruff >/dev/null 2>&1; then \
 		ruff check hello.py test_hello.py ; \
 	else \
@@ -26,7 +44,7 @@ lint: ## Static checks (ruff, falls back to py_compile)
 build: ## Syntax-check
 	$(PYTHON3) -m py_compile hello.py
 
-test: build ## Unit tests (pytest)
+test: .deps build ## Unit tests (pytest)
 	@if $(PYTHON3) -c "import pytest" 2>/dev/null; then \
 		$(PYTHON3) -m pytest test_hello.py -v ; \
 	else \
@@ -47,4 +65,4 @@ verify: build ## Confirm the deployed script actually works
 
 e2e: verify ## Alias for verify
 
-all: lint test build deploy verify ## Run the full pipeline
+all: .deps lint test build deploy verify ## Run the full pipeline

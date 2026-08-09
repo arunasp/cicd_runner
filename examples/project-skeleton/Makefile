@@ -3,9 +3,9 @@
 # Copy this Makefile into a new project's root and fill in each
 # target's recipe with that project's real commands. Standard DevOps
 # target vocabulary (lint/test/build/deploy/verify/e2e/all) matches
-# LocusAI's own root Makefile and cicd_runner's README examples --
-# once these targets exist and do something real, the project works
-# immediately with cicd_runner, no changes needed there:
+# cicd_runner's own README examples -- once these targets exist and
+# do something real, the project works immediately with cicd_runner,
+# no changes needed there:
 #   run_command(project="<name>", binary="make", args=["lint"])       # named, pre-mounted
 #   run_in_directory(relative_path="<name>", binary="make", args=["lint"])  # ad hoc, under DYNAMIC_ROOT
 #
@@ -58,10 +58,9 @@ verify: ## TODO: replace with a real post-deploy health check
 	@echo "TODO: add a real verify command" >&2
 	@exit 1
 
-# Alias for verify by default -- matches LocusAI's own convention
-# (documented there as an explicit alias, not a fabricated distinct
-# suite). Point this at a real, separate e2e target instead once one
-# exists for this project.
+# Alias for verify by default, not a fabricated distinct suite.
+# Point this at a real, separate e2e target instead once one exists
+# for this project.
 e2e: verify ## Alias for verify
 
 all: lint test build deploy verify ## Run the full pipeline

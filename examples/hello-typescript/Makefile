@@ -9,8 +9,16 @@ NODE ?= node
 NPX ?= npx
 PREFIX ?= /usr/local
 
-.PHONY: lint test build deploy verify e2e all clean node_modules
+.PHONY: lint test build deploy verify e2e all clean
 
+# node_modules deliberately NOT in .PHONY (a real, live bug found and
+# fixed 2026-08-09 while auditing example Makefiles for cache-
+# populating dependency steps): listing a real, file-based target in
+# .PHONY forces make to treat it as always-out-of-date, so `npm
+# install` re-ran on every single invocation regardless of whether
+# package.json had actually changed -- defeating the entire point of
+# this target existing (checking timestamps to skip a redundant
+# install, matching hello-python's own .deps sentinel-file pattern).
 node_modules: package.json
 	$(NPM) install
 	@touch node_modules

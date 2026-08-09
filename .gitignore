@@ -33,6 +33,17 @@ desktop-extension/dist/*.mcpb
 # Runtime debug trace written by desktop-extension/index.js
 desktop-extension/debug.log
 
+# Real, live gaps found and fixed 2026-08-09 while auditing example
+# Makefiles for cache-populating dependency steps: none of these
+# were gitignored at all, so a real `make deps`/`make build` run in
+# any example project risked a later `git add -A` accidentally
+# staging hundreds of third-party files (confirmed live -- exactly
+# this happened testing the hello-python/hello-typescript deps fixes
+# below, caught before committing).
+examples/*/node_modules/
+examples/*/.deps
+examples/*/target/
+
 # npm dependencies for the desktop extension (@modelcontextprotocol/sdk,
 # used directly in-process by index.js -- see index.js's own header
 # comment for why). package.json IS committed; only the installed
@@ -68,6 +79,5 @@ configure~
 .pytest_cache/
 
 # Local diagnostic output from deploy_cicd_runner.sh -- scratch, not
-# project content, matches LocusAI's own established logs/ convention
-# for exactly this kind of thing.
+# project content.
 /logs/
