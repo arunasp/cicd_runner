@@ -66,11 +66,35 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Named-project mounts -- kept for run_command()'s own
       # docker-compose-build use case (needs coordinator-visible build
-      # context, not just a host path handed to the daemon). None by
-      # default -- add your own here following the same pattern, e.g.
+      # context, not just a host path handed to the daemon). Add your
+      # own here following the same pattern, e.g.
       # `- ${MY_PROJECT_DIR}:/projects/my-project`, matching a line in
       # .env/.env.example -- see "Adding a new named project" in
       # README.md and examples/project-skeleton/.
+      #
+      # cicd_runner mounting itself (added 2026-08-09, per Arunas's
+      # own explicit request -- "you should be doing [verification]
+      # by yourself per CVV#15"): confirmed live that neither
+      # run_command() (no project was ever mounted by default) nor
+      # run_in_directory() (its own ephemeral worker containers are
+      # network-isolated from the coordinator -- "localhost" inside
+      # one never reaches the coordinator's own :1444) could reach
+      # the coordinator's own /health endpoint at all -- a genuine,
+      # structural self-verification gap, not a workaround-able one.
+      # Self-referential, not external-project coupling (every clone
+      # of this repo wants to mount itself the same way, regardless
+      # of who runs it) -- unlike the LocusAI/opencode-* named mounts
+      # removed earlier this session, this is appropriate to commit
+      # as a real default. `.` resolves relative to this compose
+      # file's own location (the repo root itself, confirmed against
+      # docker compose's own documented relative-path resolution) --
+      # self-locating, no .env entry needed, matching
+      # DYNAMIC_ROOT_HOST/CACHE_ROOT_HOST's own pattern. Lets
+      # run_command(project="cicd_runner", binary="python3", ...)
+      # reach the coordinator's own localhost:1444 directly, and also
+      # doubles as a real dogfooding example: this project's own
+      # `make check`/pytest suite can now run through itself.
+      - .:/projects/cicd_runner
       # Read-only, existence-check ONLY -- run_in_directory() never
       # reads/writes through this path. Real work happens in an
       # ephemeral worker mounted against DYNAMIC_ROOT_HOST above,
