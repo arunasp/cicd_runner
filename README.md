@@ -120,6 +120,25 @@ JSON-RPC error instead of a health-style response. That's expected
 protocol enforcement, not something broken — `/health` above is the
 right endpoint for a plain liveness check.
 
+**Checking health from inside cicd-runner's own tools** (e.g. a
+Makefile pipeline step, or an MCP client verifying itself) needs a
+different approach entirely: `make health-check` (in this repo's own
+root, already reachable via `run_command(project="cicd_runner",
+binary="make", args=["health-check"])`, since this repo mounts itself
+as a named project by default — see [Adding a new named
+project](#adding-a-new-named-project)) checks the same underlying
+conditions directly — docker socket existence, env vars — without an
+HTTP round-trip. Don't `curl localhost:1444/health` from inside a
+`run_command()`/`run_in_directory()` call to check this instead: that
+is a real, confirmed self-deadlock, not just a bad idea — FastMCP
+dispatches a synchronous `@mcp.tool()` function like `run_command()`
+directly on the coordinator's single asyncio event loop, so its own
+`subprocess.run()` blocks that same loop for its whole duration,
+meaning a child process it spawns can never get a response from the
+coordinator's own HTTP server. A plain `curl`/`python3` one-liner
+tried this way hangs indefinitely and can wedge the coordinator until
+it's manually restarted.
+
 Day-to-day, `make start` / `make stop` / `make restart` cover
 relaunching without a full rebuild; `make build` rebuilds the Docker
 images first if the coordinator or worker source changed.
