@@ -1,0 +1,10 @@
+{
+  "name": "cicd-runner-desktop-extension",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Desktop-extension entry point for cicd-runner's project-agnostic MCP proxy. Uses @modelcontextprotocol/sdk's own transports directly, in-process -- no subprocess, no mcp-remote -- confirmed necessary after three distinct real failures with a subprocess-based design under Claude Desktop's own extension hosting.",
+  "main": "index.js",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.3"
+  }
+}

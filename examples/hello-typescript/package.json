@@ -1,0 +1,10 @@
+{
+  "name": "hello-typescript-example",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real, filled-in hello-world example for cicd_runner's standard CI/CD pipeline vocabulary.",
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.10.0"
+  }
+}

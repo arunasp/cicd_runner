@@ -1,14 +1,19 @@
 # Binaries the cicd-runner MCP proxy (bash_mcp_server.py) is permitted
-# to run, per-project, inside whichever /projects/<name> directory the
-# caller selects. One name per line; blank lines and '#' comments are
-# ignored.
+# to run -- both for run_command() (directly, in this coordinator
+# container) and run_in_directory() (the binary requested is what gets
+# invoked as the ephemeral worker container's own command; this check
+# happens HERE, in the coordinator, before that worker is ever
+# started -- the worker itself has no allowlist logic of its own, by
+# design, since it never runs an unvetted binary in the first place).
+#
+# One name per line; blank lines and '#' comments are ignored.
 #
 # This file lives under /app in the image (COPY'd, not bind-mounted --
 # unlike LocusAI's own allowlist.txt, which lives under the /workspace
 # bind mount and can be hot-edited on the host). Changing this list
 # needs an image rebuild here, since there's no single project
 # directory this file could live under instead -- it's shared across
-# every mounted project.
+# every mounted project AND every run_in_directory() call.
 #
 # `docker` being allowlisted already sets this container's privilege
 # ceiling at "root-equivalent on the host" (that's the entire reason
@@ -17,7 +22,9 @@
 # is narrower than that, so none of it raises the actual ceiling
 # further; it's here for genuine per-project pipeline needs, not
 # because each entry was independently risk-assessed against a lower
-# bar than docker itself already sets.
+# bar than docker itself already sets. Note: requesting `docker` via
+# run_in_directory() will just fail harmlessly inside the worker --
+# that image has no docker CLI installed at all (see worker/Dockerfile).
 
 ls
 cat
@@ -37,3 +44,14 @@ node
 npm
 npx
 shellcheck
+
+# make: added 2026-08-08 -- lets a project's own Makefile (standard
+# lint/build/deploy/verify/e2e/all target names, see e.g. LocusAI's
+# root Makefile) be invoked directly through run_command/
+# run_in_directory instead of each stage's underlying tool being
+# called separately. Installed in BOTH images (coordinator and
+# worker) -- named-project calls via run_command need it in the
+# coordinator, ad hoc calls via run_in_directory need it in the
+# worker, and there's no way to know in advance which path a given
+# project's Makefile will be invoked through.
+make

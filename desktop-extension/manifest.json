@@ -1,0 +1,45 @@
+{
+  "manifest_version": "0.4",
+  "name": "cicd-runner",
+  "display_name": "cicd-runner",
+  "version": "1.4.0",
+  "description": "Project-agnostic CI/CD execution across all projects, running as a persistent Docker service (with real docker-socket access) reached over TCP (localhost:1444) via @modelcontextprotocol/sdk's own transports directly, in-process -- works across the Windows/WSL2 boundary, no subprocess spawning.",
+  "author": {
+    "name": "cicd-runner contributors"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/index.js", "${user_config.allowed_directories}"]
+    }
+  },
+  "user_config": {
+    "allowed_directories": {
+      "type": "directory",
+      "title": "Additional Allowed Directories",
+      "description": "Directories run_in_directory() may access beyond a project's own opencode.json external_directory rules. MCP's own 'roots' protocol -- the spec-native way a server would normally learn this -- cannot be used here: this extension connects directly to a single coordinator session, not through Desktop's own client identity. This setting is the real substitute for that gap, sent to the server as a request header (see index.js/server/bash_mcp_server.py). Optional -- leave empty if only named/mounted projects and their own opencode.json rules need to be reachable.",
+      "multiple": true,
+      "required": false,
+      "default": []
+    }
+  },
+  "tools": [
+    {
+      "name": "list_projects",
+      "description": "List the projects currently mounted and available to run_command."
+    },
+    {
+      "name": "run_command",
+      "description": "Run one allowlisted binary with an argv list inside the named project's mounted directory. No shell is invoked."
+    },
+    {
+      "name": "run_in_directory",
+      "description": "Run one allowlisted binary against an arbitrary subdirectory of the dynamic root, named at call time, in a fresh ephemeral worker container."
+    }
+  ],
+  "compatibility": {
+    "platforms": ["win32", "linux"]
+  }
+}

@@ -1,0 +1,4 @@
+# Placeholder so git tracks this directory -- autoreconf's -I m4
+# flag expects it to exist. Empty for now; would hold custom .m4
+# macro files if this project ever needs any beyond the standard
+# autoconf/automake macro set.

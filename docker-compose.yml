@@ -1,10 +1,11 @@
 # Do NOT run `docker compose`/`docker-compose` directly against this
 # file without checking start.sh first for the same reason as
-# LocusAI's own docker-compose.yml: recreating an existing container
+# LocusAI's docker-compose.yml: recreating an existing container
 # in place can hit docker-compose v1's `KeyError: 'ContainerConfig'`
-# bug (docker/compose#11742) after a rebuild. Prefer start.sh (once
-# it exists here) or `docker compose build && docker compose up -d`
-# with an explicit `docker compose rm -sf` first.
+# bug (docker/compose#11742) after a rebuild. Prefer start.sh
+# (builds both the coordinator AND the worker image) or
+# `docker compose build && docker compose up -d` with an explicit
+# `docker compose rm -sf` first.
 services:
   cicd-runner:
     build: ./server
@@ -13,30 +14,69 @@ services:
     environment:
       MCP_PORT: "1444"
       CICD_TIMEOUT_SECONDS: "300"
+      WORKER_IMAGE: "cicd-worker"
+      # The HOST-absolute equivalent of the /dynamic-root read-only
+      # mount below -- needed because run_in_directory() spawns
+      # SIBLING containers via the mounted docker socket, and a
+      # sibling's bind-mount source must be a real HOST path, not a
+      # path that only means something inside THIS container's own
+      # filesystem namespace. See bash_mcp_server.py's own docstring.
+      # Computed by start.sh (this project's own PARENT directory --
+      # sibling projects stay reachable, matching the original
+      # design) rather than set in .env by hand -- self-locating, so
+      # it can't drift if this checkout is ever moved. Shell-exported
+      # variables take precedence over .env file values for compose
+      # interpolation, so this always reflects start.sh's own
+      # computed value regardless of what (if anything) .env sets.
+      DYNAMIC_ROOT_HOST: ${DYNAMIC_ROOT:-}
+      # Optional -- root of the persistent dependency-cache mounts
+      # (npm/cargo/pip) added into every run_in_directory() worker
+      # call. Same host-path-not-container-path reasoning as
+      # DYNAMIC_ROOT_HOST above -- the coordinator never reads/writes
+      # here itself (unlike DYNAMIC_ROOT, no validation mount is
+      # needed either: this is a fixed, admin-configured value, not
+      # per-call user input, and an empty/nonexistent cache dir on
+      # first use is harmless). Empty means caching is off entirely,
+      # not an error -- see bash_mcp_server.py's own docstring for the
+      # real trade-off this introduces. Computed by start.sh as
+      # .cicd-runner-cache/ inside this checkout (gitignored), same
+      # self-locating reasoning as DYNAMIC_ROOT_HOST above.
+      CACHE_ROOT_HOST: ${CACHE_ROOT:-}
+      # Real host uid:gid (set by start.sh from `id -u`/`id -g` for
+      # whoever launches the service, not something to configure by
+      # hand) -- passed to every run_in_directory() worker's own
+      # `docker run --user`, so files it creates on a host bind-mount
+      # are owned correctly from the start instead of ending up
+      # root-owned (the worker's default user otherwise). Confirmed
+      # real 2026-08-08: examples/hello-rust's cargo build/test left
+      # target/ root-owned on the host, breaking this project's own
+      # install-data-local Makefile target until worked around --
+      # this is the general fix, not project-specific. Empty/unset
+      # (not an error) means the old, no --user behavior, same
+      # optional-degrades-gracefully pattern as CACHE_ROOT_HOST.
+      HOST_UID: ${HOST_UID:-}
+      HOST_GID: ${HOST_GID:-}
     ports:
-      # 1444, not LocusAI's 1443 -- avoids a port collision if both
-      # containers run on the same host at once (same reasoning
-      # already applied between LocusAI and Axiom's own separate
-      # opencode serve instance, see opencode-model-eval notes).
-      # Bound to 127.0.0.1 explicitly, matching LocusAI's own
-      # reasoning: WSL2's localhost-forwarding already keeps this off
-      # the LAN by default, but binding explicitly is the correct
-      # belt-and-braces choice rather than relying on that alone.
+      # Bound to 127.0.0.1 explicitly -- WSL2's own localhost-forwarding
+      # already keeps this off the LAN by default, but binding
+      # explicitly is the correct belt-and-braces choice.
       - "127.0.0.1:1444:1444"
     volumes:
       # The one place this project's whole reason to exist lives: real
-      # access to the HOST's docker daemon, not a nested one. This is
-      # what lets it run `docker compose build/up` for a PROJECT's own
-      # services without that project's own container trying (and
-      # structurally failing) to rebuild itself.
+      # access to the HOST's docker daemon, not a nested one.
       - /var/run/docker.sock:/var/run/docker.sock
-      # One mount per project, each its own named subdirectory under
-      # /projects -- see bash_mcp_server.py's project-selector logic.
-      # Paths come from .env (gitignored, host-specific -- see
-      # .env.example for the expected keys), not hardcoded here, since
-      # this file is meant to be portable across whichever host it
-      # runs on.
+      # Named-project mounts -- kept for run_command()'s own
+      # docker-compose-build use case (needs coordinator-visible build
+      # context, not just a host path handed to the daemon).
       - ${LOCUSAI_DIR}:/projects/LocusAI
       - ${OPENCODE_MODEL_EVAL_DIR}:/projects/opencode-model-eval
       - ${OPENCODE_CTX_SQUID_DIR}:/projects/opencode-plugin-ctx-squid
+      # Read-only, existence-check ONLY -- run_in_directory() never
+      # reads/writes through this path. Real work happens in an
+      # ephemeral worker mounted against DYNAMIC_ROOT_HOST above,
+      # read-write, scoped to one subdirectory for one call. Defaults
+      # to a path that can never exist so bypassing start.sh (the
+      # only place DYNAMIC_ROOT gets set) fails loudly (empty phantom
+      # mount) rather than silently resolving to something unintended.
+      - ${DYNAMIC_ROOT:-/nonexistent-unless-configured}:/dynamic-root:ro
     restart: unless-stopped

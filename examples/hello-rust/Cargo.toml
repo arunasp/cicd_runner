@@ -1,0 +1,4 @@
+[package]
+name = "hello-rust-example"
+version = "1.0.0"
+edition = "2021"

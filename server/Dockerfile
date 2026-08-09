@@ -3,14 +3,40 @@ FROM python:3.12-slim
 # Base toolchain every project's tools/pipeline.sh-style lint/test stage
 # needs: git (push/pull, same allowlist reasoning as LocusAI's own),
 # openssh-client (git-over-ssh), curl/gnupg (fetching the two apt repos
-# below), shellcheck (lint stage).
+# below), shellcheck (lint stage), gcc + libc6-dev (added 2026-08-08 --
+# confirmed live via examples/hello-gcc's real `make lint`/`build`
+# genuinely failing with 'cc: No such file or directory' through
+# run_command before this; explicit, not relying on gcc's own Recommends
+# to pull libc6-dev, since --no-install-recommends below skips those).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         openssh-client \
         curl \
         gnupg \
         shellcheck \
+        make \
+        gcc \
+        libc6-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Real bug found live 2026-08-08: this container runs as root by
+# default (no USER directive), so its own `git` invocations (e.g.
+# resolve_project_dir.sh's `git rev-parse --show-toplevel`, used by
+# LocusAI and other mounted projects) can end up owned by a DIFFERENT
+# uid than the mounted project directory -- confirmed live: right
+# after a host-side `chown` to the real host user, LocusAI's own
+# server startup started failing with git's own dubious-ownership
+# protection ("detected dubious ownership in repository at
+# '/projects/LocusAI'"), a real security feature (CVE-2022-24765)
+# meant to stop a DIFFERENT-uid process from silently operating on a
+# repo it doesn't own. A wildcard is the right call specifically
+# HERE, not a blanket bypass: every path this container ever operates
+# on is an explicit, admin-configured mount from docker-compose.yml/
+# .env (the named /projects/* mounts, or DYNAMIC_ROOT for
+# run_in_directory()) -- there's no path by which an untrusted,
+# arbitrary repository could ever reach this check, so the ownership
+# protection has nothing meaningful left to guard against here.
+RUN git config --global --add safe.directory '*'
 
 # gh CLI, official repo per current docs (same pattern as LocusAI's own
 # Dockerfile, verified there 2026-08-06).
@@ -57,5 +83,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY lib/ lib/
 COPY allowlist.txt .
 COPY bash_mcp_server.py .
+
+# Shared, reusable Makefile fragment (self-documenting `help` target)
+# baked in at a fixed path -- see examples/cicd-common.mk (canonical
+# source) for the full reasoning. Any project's own Makefile can
+# `-include /etc/cicd-common.mk` to pick this up automatically when
+# run through this coordinator, no per-project copy needed.
+COPY cicd-common.mk /etc/cicd-common.mk
 
 WORKDIR /projects
