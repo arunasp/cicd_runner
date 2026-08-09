@@ -112,5 +112,6 @@ AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
 
 AC_MSG_NOTICE([])
-AC_MSG_NOTICE([Configured. Next: make && make check && sudo make install])
+AC_MSG_NOTICE([Configured. Next: make && make check])
+AC_MSG_NOTICE([`sudo make install` is optional -- it stages a SEPARATE, packaged copy under /usr/local/share/cicd-runner for distribution, not something an already-running checkout like this one needs for daily use.])
 AC_MSG_NOTICE([(or, from this project's own richer interface: make help)])
