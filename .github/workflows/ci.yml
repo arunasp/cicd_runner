@@ -10,13 +10,13 @@ jobs:
   autotools:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install autotools + shellcheck
         run: sudo apt-get update && sudo apt-get install -y autoconf automake shellcheck
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.x'
 
@@ -33,10 +33,10 @@ jobs:
   desktop-extension:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
 
@@ -46,7 +46,7 @@ jobs:
       # Uploaded so tag-release can attach it to the GitHub Release
       # without rebuilding -- artifacts don't cross jobs by default.
       - name: Upload .mcpb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: desktop-extension-mcpb
           path: desktop-extension/dist/*.mcpb
@@ -54,7 +54,7 @@ jobs:
   docker-compose-syntax:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Validate docker-compose.yml
         run: docker compose -f docker-compose.yml config
 
@@ -81,7 +81,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0   # full history -- need every existing tag to check against
 
@@ -153,7 +153,7 @@ jobs:
 
       - name: Download the .mcpb artifact
         if: steps.check.outputs.exists == 'false'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-extension-mcpb
           path: desktop-extension/dist/
