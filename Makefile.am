@@ -44,7 +44,7 @@ all-local:
 # extension, and doing it once at configure time is cheaper anyway.
 COMPOSE = @COMPOSE_CMD@
 
-.PHONY: help build build-extension build-all start stop restart logs status health-check
+.PHONY: help build build-extension build-all start stop restart logs status health-check push
 
 help:
 	@echo "Autotools-standard targets: check install uninstall dist clean"
@@ -58,6 +58,7 @@ help:
 	@echo "  logs            - follow the coordinator's logs"
 	@echo "  status          - show container status"
 	@echo "  health-check    - check coordinator health (see health-check's own comment)"
+	@echo "  push            - git push origin main (see push's own comment on where this can actually run)"
 
 build:
 	./build.sh
@@ -80,6 +81,26 @@ logs:
 
 status:
 	$(COMPOSE) ps
+
+# `make push` -- a real, thin `git push origin main` wrapper, added
+# per Arunas's own request (2026-08-09) so pushing is a real pipeline
+# step rather than a bare command to remember. Deliberately does NOT
+# come with any credential setup of its own -- this project's own
+# stated design decision (see README's "No SSH keys or git
+# credentials are mounted here") means the coordinator/worker
+# containers have zero GitHub push credentials by design, confirmed
+# repeatedly this session (git add/commit/amend all work fine via
+# run_command()/run_in_directory() -- they only touch the real,
+# bind-mounted host checkout -- but push itself has needed Arunas's
+# own credentials/action every single time so far). This target does
+# NOT change that boundary -- it's the same `git push` either way,
+# just given a name. Run from a host shell where this remote's
+# credentials are actually configured (Arunas's own terminal); run
+# via run_command()/the MCP tools instead and expect the same auth
+# failure this project has hit every time credentials were needed,
+# since the coordinator container genuinely has none.
+push:
+	git push origin main
 
 # `make health-check` -- run via run_command(project="cicd_runner",
 # binary="make", args=["health-check"]) so this project can

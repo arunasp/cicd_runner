@@ -650,7 +650,23 @@ make build-all        # both
 make start            # ./start.sh (builds runner, then launches)
 make stop / restart / logs / status
 make all              # build-all + start
+make push             # git push origin main -- see below for where this can actually run
 ```
+
+`make push` is a real pipeline step, not just documentation for a
+command to remember — but it's the exact same `git push origin main`
+either way, and doesn't grant this project's own containers any
+credentials they didn't already have. The coordinator/worker
+containers have zero GitHub push credentials by design (see [Design
+decisions](#design-decisions)), confirmed repeatedly: `git add`/
+`commit`/`amend` all work fine via `run_command()`/`run_in_directory()`
+since they only touch the real, bind-mounted host checkout, but `push`
+itself has needed a human's own credentials every single time so far.
+Run `make push` from a host shell where this remote's credentials are
+actually configured; running it via the MCP tools instead hits the
+same auth failure `git push` always would from inside these
+containers — that's the credential boundary working as designed, not
+a bug in the target.
 
 `build.sh` builds the worker and coordinator images and needs only
 `docker` — `docker compose`/`docker-compose` is detected lazily, only
@@ -708,7 +724,11 @@ images. At most one resolves in any given context. If neither does,
   other entry is narrower than that.
 - **No SSH keys or git credentials are mounted here.** Projects that
   need `git push` keep that capability in their own container, scoped
-  to that one repo.
+  to that one repo. Applies to this project's own repo too —
+  `make push` (see [Build script](#build-script)) is a real target,
+  not a workaround around this boundary: it's the same bare
+  `git push origin main`, and only succeeds where a human's own
+  credentials for this remote are actually present.
 
 ## Status
 
