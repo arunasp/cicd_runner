@@ -44,6 +44,37 @@ all-local:
 # extension, and doing it once at configure time is cheaper anyway.
 COMPOSE = @COMPOSE_CMD@
 
+# KNOWN LIMITATION, not fully fixed (found live 2026-08-09, while
+# adding the push/health-check targets below): Autotools bakes
+# ABSOLUTE host paths into the generated Makefile at ./configure
+# time -- not just $(srcdir)/$(abs_srcdir) (which resolve fine either
+# way, since most recipes use the RELATIVE $(srcdir)="."), but the
+# derived ACLOCAL/AUTOCONF/AUTOMAKE/AUTOHEADER/MAKEINFO variables
+# specifically, which are substituted as e.g.
+# `${SHELL} '/home/arunasp/stuff/cicd_runner/missing' automake-1.16`
+# -- a genuine absolute path, standard Autotools behavior, not a bug
+# in this project's own code. This repo mounts itself into the
+# coordinator at a DIFFERENT absolute path (/projects/cicd_runner,
+# see docker-compose.yml's own self-mount) than wherever it actually
+# lives on the real host (confirmed live: /home/arunasp/stuff/
+# cicd_runner) -- so those baked host-absolute paths don't exist
+# inside the container. This stays LATENT, not visibly broken, as
+# long as Makefile.am/configure.ac are already up to date relative to
+# the generated Makefile (Automake's own standard auto-regeneration
+# chain, `Makefile: Makefile.in Makefile.am ...`, simply never fires
+# in that case) -- confirmed exactly this way live: a real regeneration
+# failure (`/bin/bash: .../missing: No such file or directory`) hit
+# when Makefile.am had just changed and `make` was invoked via
+# run_command() before a host-side regeneration ran first; the SAME
+# failure will recur any time this happens again. No clean fix without
+# either breaking the established /projects/<name> mounting
+# convention (mounting this repo at its own real host path instead)
+# or accepting the constraint -- accepting it, documented as a
+# standing rule instead: after ANY Makefile.am/configure.ac edit,
+# regenerate on the real HOST first (`make`, or `./autogen.sh &&
+# ./configure`) BEFORE the next run_command()/run_in_directory() call
+# that invokes `make` -- never the other way around.
+
 .PHONY: help build build-extension build-all start stop restart logs status health-check push
 
 help:
