@@ -64,7 +64,7 @@ curl http://localhost:1444/health
 ```
 
 ```json
-{"status":"ok","docker_socket":true,"dynamic_root_configured":true,"cache_root_configured":false}
+{"status":"ok","docker_socket":true,"dynamic_root_configured":true,"cache_root_configured":true}
 ```
 
 See [Installation](#installation) for the full walkthrough, including
@@ -94,7 +94,7 @@ curl http://localhost:1444/health
 ```
 
 ```json
-{"status":"ok","docker_socket":true,"dynamic_root_configured":true,"cache_root_configured":false}
+{"status":"ok","docker_socket":true,"dynamic_root_configured":true,"cache_root_configured":true}
 ```
 
 A real `GET /health` endpoint, outside the MCP protocol entirely —
