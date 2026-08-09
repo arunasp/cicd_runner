@@ -46,6 +46,40 @@ def dynamic_root(tmp_path, monkeypatch):
     return root
 
 
+class TestHealthCheck:
+    @pytest.mark.asyncio
+    async def test_returns_ok_status(self, monkeypatch):
+        monkeypatch.setattr(srv, "DOCKER_SOCKET_PATH", Path("/nonexistent"))
+        response = await srv.health_check(None)
+        body = json.loads(response.body)
+        assert body["status"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_reports_real_docker_socket_state(self, monkeypatch, tmp_path):
+        real_socket = tmp_path / "docker.sock"
+        real_socket.touch()
+        monkeypatch.setattr(srv, "DOCKER_SOCKET_PATH", real_socket)
+        response = await srv.health_check(None)
+        body = json.loads(response.body)
+        assert body["docker_socket"] is True
+
+    @pytest.mark.asyncio
+    async def test_reports_missing_docker_socket(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(srv, "DOCKER_SOCKET_PATH", tmp_path / "nonexistent.sock")
+        response = await srv.health_check(None)
+        body = json.loads(response.body)
+        assert body["docker_socket"] is False
+
+    @pytest.mark.asyncio
+    async def test_reports_dynamic_root_and_cache_configuration(self, monkeypatch):
+        monkeypatch.setattr(srv, "DYNAMIC_ROOT_HOST", "/some/path")
+        monkeypatch.setattr(srv, "CACHE_ROOT_HOST", "")
+        response = await srv.health_check(None)
+        body = json.loads(response.body)
+        assert body["dynamic_root_configured"] is True
+        assert body["cache_root_configured"] is False
+
+
 class TestResolveProjectDir:
     def test_valid_project(self, projects_root):
         assert srv._resolve_project_dir("SampleProject") == projects_root / "SampleProject"

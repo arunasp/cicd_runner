@@ -165,6 +165,8 @@ from urllib.request import url2pathname
 
 import mcp.types as types
 from mcp.server.fastmcp import Context, FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from lib.common import FileAllowlist, ExecutionResult, run_allowlisted
 
@@ -179,6 +181,7 @@ IMAGE_CONFIG_FILENAME = ".cicd-image"
 OPENCODE_CONFIG_FILENAME = "opencode.json"
 ALLOWED_DIRECTORIES_HEADER = "X-Allowed-Directories"
 TIMEOUT_SECONDS = int(os.environ.get("CICD_TIMEOUT_SECONDS", "300"))
+DOCKER_SOCKET_PATH = Path("/var/run/docker.sock")
 
 ALLOWED_BINARIES = FileAllowlist(Path("/app/allowlist.txt"))
 
@@ -187,6 +190,37 @@ mcp = FastMCP(
     host="0.0.0.0",
     port=int(os.environ.get("MCP_PORT", "1444")),
 )
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request) -> JSONResponse:
+    """Plain HTTP health check, outside the MCP protocol entirely --
+    the SDK's own documented mechanism for this (FastMCP.custom_route(),
+    confirmed against its real source/docstring, which gives this exact
+    /health-endpoint shape as its own example). Deliberately NOT the
+    /mcp endpoint: that one correctly rejects any request without a
+    real MCP client's Accept: text/event-stream header (a 406, not a
+    failure -- see README.md's own note on this), which makes it a
+    poor fit for a plain `curl`/uptime-monitor health check that just
+    wants a clean 200. This route requires no auth (per custom_route's
+    own docs, intended for exactly this public/health-check use) and
+    bypasses the MCP session/protocol layer entirely.
+
+    Checks the docker socket's own existence directly (a cheap
+    Path.exists() stat call, not a docker subprocess invocation) --
+    this coordinator's entire reason to exist is docker-socket access
+    (see this module's own docstring), so a health check that didn't
+    confirm that would miss the one dependency that actually matters
+    most. Also reports whether DYNAMIC_ROOT_HOST/CACHE_ROOT_HOST are
+    configured, real state a person debugging "why isn't my project
+    reachable" would otherwise have to go dig up separately.
+    """
+    return JSONResponse({
+        "status": "ok",
+        "docker_socket": DOCKER_SOCKET_PATH.exists(),
+        "dynamic_root_configured": bool(DYNAMIC_ROOT_HOST),
+        "cache_root_configured": bool(CACHE_ROOT_HOST),
+    })
 
 
 def _resolve_project_dir(project: str) -> Path | None:

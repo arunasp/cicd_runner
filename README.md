@@ -60,20 +60,15 @@ make all                # build everything (runner + extension) + launch
 
 ```bash
 make logs
-curl -i http://localhost:1444/mcp
+curl http://localhost:1444/health
 ```
 
-```
-HTTP/1.1 406 Not Acceptable
-...
-{"jsonrpc":"2.0","id":"server-error","error":{"code":-32600,"message":"Not Acceptable: Client must accept text/event-stream"}}
+```json
+{"status":"ok","docker_socket":true,"dynamic_root_configured":true,"cache_root_configured":false}
 ```
 
-That `406`/JSON-RPC error is expected — a plain `curl` isn't a real MCP
-client (it doesn't send `Accept: text/event-stream`), so this just
-confirms the streamable-HTTP transport is enforcing its protocol
-correctly, not a failure. See [Installation](#installation) for the
-full walkthrough, including connecting an actual MCP client.
+See [Installation](#installation) for the full walkthrough, including
+connecting an actual MCP client.
 
 ## Installation
 
@@ -95,21 +90,30 @@ make all                # build everything (runner + extension) + launch
 ```bash
 make status   # confirm the container is up
 make logs     # follow the coordinator's own logs
-curl -i http://localhost:1444/mcp
+curl http://localhost:1444/health
 ```
 
-```
-HTTP/1.1 406 Not Acceptable
-...
-{"jsonrpc":"2.0","id":"server-error","error":{"code":-32600,"message":"Not Acceptable: Client must accept text/event-stream"}}
+```json
+{"status":"ok","docker_socket":true,"dynamic_root_configured":true,"cache_root_configured":false}
 ```
 
-That `406`/JSON-RPC error from `curl` is expected, not a failure —
-see the same note under [Quick start](#quick-start): a plain `curl`
-doesn't send the `Accept: text/event-stream` header a real MCP client
-would, so the coordinator correctly refuses it. This just confirms
-the streamable-HTTP transport is enforcing its protocol, not
-something broken.
+A real `GET /health` endpoint, outside the MCP protocol entirely —
+run through a plain `curl`/uptime monitor without needing a real MCP
+client. `docker_socket` confirms the coordinator can actually reach
+`/var/run/docker.sock` (the one dependency that matters most, since
+that access is this project's whole reason to exist — see [Why a
+separate service](#why-a-separate-service)); `dynamic_root_configured`/
+`cache_root_configured` reflect whether `DYNAMIC_ROOT_HOST`/
+`CACHE_ROOT_HOST` are set (see [Configuration](#configuration),
+[Dependency caching](#dependency-caching)).
+
+Don't `curl` `/mcp` directly expecting the same shape — that's the
+real MCP protocol endpoint, and a plain `curl` isn't a real MCP client
+(it doesn't send the `Accept: text/event-stream` header the
+streamable-HTTP transport requires), so it correctly returns a `406`
+JSON-RPC error instead of a health-style response. That's expected
+protocol enforcement, not something broken — `/health` above is the
+right endpoint for a plain liveness check.
 
 Day-to-day, `make start` / `make stop` / `make restart` cover
 relaunching without a full rebuild; `make build` rebuilds the Docker
@@ -228,7 +232,9 @@ Two containers:
 ```
 
 **`cicd-runner` (coordinator)** — the only container with access to
-`/var/run/docker.sock`. Exposes two tools:
+`/var/run/docker.sock`. Exposes two MCP tools, plus a plain HTTP
+`GET /health` endpoint outside the MCP protocol (see [Quick
+start](#quick-start)):
 
 - `run_command(project, binary, args)` — runs directly in the
   coordinator, against a named project mounted at `/projects/<name>`.
