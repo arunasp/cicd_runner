@@ -214,13 +214,30 @@ async def health_check(request: Request) -> JSONResponse:
     most. Also reports whether DYNAMIC_ROOT_HOST/CACHE_ROOT_HOST are
     configured, real state a person debugging "why isn't my project
     reachable" would otherwise have to go dig up separately.
+
+    Returns HTTP 503, not 200, when docker_socket is missing (added
+    2026-08-09, fixing a real design flaw Arunas caught: a 200
+    regardless of docker_socket's value meant any automated monitor
+    that only checks the status code -- which is the normal way
+    uptime/liveness checks work -- would report "healthy" even when
+    the coordinator's one foundational dependency was absent, defeating
+    the entire purpose of having a health check at all). dynamic_root/
+    cache_root being unconfigured do NOT affect the status code --
+    those are legitimate, intentionally-optional degrade-gracefully
+    states (see _cache_mount_flags()/run_in_directory()'s own
+    docstrings), not failures; only docker_socket's absence represents
+    something genuinely broken.
     """
-    return JSONResponse({
-        "status": "ok",
-        "docker_socket": DOCKER_SOCKET_PATH.exists(),
-        "dynamic_root_configured": bool(DYNAMIC_ROOT_HOST),
-        "cache_root_configured": bool(CACHE_ROOT_HOST),
-    })
+    docker_socket_ok = DOCKER_SOCKET_PATH.exists()
+    return JSONResponse(
+        {
+            "status": "ok" if docker_socket_ok else "unhealthy",
+            "docker_socket": docker_socket_ok,
+            "dynamic_root_configured": bool(DYNAMIC_ROOT_HOST),
+            "cache_root_configured": bool(CACHE_ROOT_HOST),
+        },
+        status_code=200 if docker_socket_ok else 503,
+    )
 
 
 def _resolve_project_dir(project: str) -> Path | None:

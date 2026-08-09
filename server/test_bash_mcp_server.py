@@ -48,11 +48,28 @@ def dynamic_root(tmp_path, monkeypatch):
 
 class TestHealthCheck:
     @pytest.mark.asyncio
-    async def test_returns_ok_status(self, monkeypatch):
-        monkeypatch.setattr(srv, "DOCKER_SOCKET_PATH", Path("/nonexistent"))
+    async def test_returns_ok_status_and_200_when_docker_socket_present(self, monkeypatch, tmp_path):
+        real_socket = tmp_path / "docker.sock"
+        real_socket.touch()
+        monkeypatch.setattr(srv, "DOCKER_SOCKET_PATH", real_socket)
         response = await srv.health_check(None)
         body = json.loads(response.body)
         assert body["status"] == "ok"
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_returns_unhealthy_status_and_503_when_docker_socket_missing(self, monkeypatch, tmp_path):
+        # The exact bug this fixes: a 200 regardless of docker_socket's
+        # value meant an automated monitor checking only the status
+        # code -- the normal way liveness checks work -- would report
+        # "healthy" even with the coordinator's one foundational
+        # dependency absent, defeating the entire point of a health
+        # check.
+        monkeypatch.setattr(srv, "DOCKER_SOCKET_PATH", tmp_path / "nonexistent.sock")
+        response = await srv.health_check(None)
+        body = json.loads(response.body)
+        assert body["status"] == "unhealthy"
+        assert response.status_code == 503
 
     @pytest.mark.asyncio
     async def test_reports_real_docker_socket_state(self, monkeypatch, tmp_path):
@@ -69,6 +86,23 @@ class TestHealthCheck:
         response = await srv.health_check(None)
         body = json.loads(response.body)
         assert body["docker_socket"] is False
+
+    @pytest.mark.asyncio
+    async def test_dynamic_root_and_cache_configuration_do_not_affect_status_code(self, monkeypatch, tmp_path):
+        # dynamic_root/cache_root being unconfigured are legitimate,
+        # intentionally-optional degrade-gracefully states, not
+        # failures -- only docker_socket's absence should flip the
+        # status code.
+        real_socket = tmp_path / "docker.sock"
+        real_socket.touch()
+        monkeypatch.setattr(srv, "DOCKER_SOCKET_PATH", real_socket)
+        monkeypatch.setattr(srv, "DYNAMIC_ROOT_HOST", "")
+        monkeypatch.setattr(srv, "CACHE_ROOT_HOST", "")
+        response = await srv.health_check(None)
+        body = json.loads(response.body)
+        assert response.status_code == 200
+        assert body["dynamic_root_configured"] is False
+        assert body["cache_root_configured"] is False
 
     @pytest.mark.asyncio
     async def test_reports_dynamic_root_and_cache_configuration(self, monkeypatch):

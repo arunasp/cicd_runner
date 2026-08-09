@@ -99,13 +99,18 @@ curl http://localhost:1444/health
 
 A real `GET /health` endpoint, outside the MCP protocol entirely —
 run through a plain `curl`/uptime monitor without needing a real MCP
-client. `docker_socket` confirms the coordinator can actually reach
-`/var/run/docker.sock` (the one dependency that matters most, since
-that access is this project's whole reason to exist — see [Why a
-separate service](#why-a-separate-service)); `dynamic_root_configured`/
-`cache_root_configured` reflect whether `DYNAMIC_ROOT_HOST`/
-`CACHE_ROOT_HOST` are set (see [Configuration](#configuration),
-[Dependency caching](#dependency-caching)).
+client. Returns HTTP `503` (not `200`) when `docker_socket` is false —
+the one dependency that matters most, since that access is this
+project's whole reason to exist (see [Why a separate
+service](#why-a-separate-service)) — so an automated monitor checking
+only the status code, the normal way liveness checks work, correctly
+sees the service as down rather than a false-positive `200`.
+`dynamic_root_configured`/`cache_root_configured` reflect whether
+`DYNAMIC_ROOT_HOST`/`CACHE_ROOT_HOST` are set (see
+[Configuration](#configuration), [Dependency
+caching](#dependency-caching)) — these do NOT affect the status code,
+since leaving either unset is a legitimate, intentionally-optional
+configuration, not a failure.
 
 Don't `curl` `/mcp` directly expecting the same shape — that's the
 real MCP protocol endpoint, and a plain `curl` isn't a real MCP client
