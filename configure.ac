@@ -9,7 +9,7 @@ dnl README and examples/project-skeleton/), so it's buildable by
 dnl anyone who knows traditional Unix/FOSS conventions and nothing
 dnl else about this specific project.
 AC_PREREQ([2.71])
-AC_INIT([cicd-runner], [1.0.0], [https://github.com/arunasp/cicd_runner/issues])
+AC_INIT([cicd-runner], [1.1.0], [https://github.com/arunasp/cicd_runner/issues])
 AC_CONFIG_SRCDIR([server/bash_mcp_server.py])
 
 dnl Force Automake's own maintainer-tool variables (MISSING itself,
