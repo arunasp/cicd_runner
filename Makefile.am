@@ -52,8 +52,7 @@ COMPOSE = @COMPOSE_CMD@
 # derived ACLOCAL/AUTOCONF/AUTOMAKE/AUTOHEADER/MAKEINFO variables
 # specifically, which are substituted as e.g.
 # `${SHELL} '/home/arunasp/stuff/cicd_runner/missing' automake-1.16`
-# -- a genuine absolute path, standard Autotools behavior, not a bug
-# in this project's own code. This repo mounts itself into the
+# -- a genuine absolute path. This repo mounts itself into the
 # coordinator at a DIFFERENT absolute path (/projects/cicd_runner,
 # see docker-compose.yml's own self-mount) than wherever it actually
 # lives on the real host (confirmed live: /home/arunasp/stuff/
@@ -66,14 +65,25 @@ COMPOSE = @COMPOSE_CMD@
 # failure (`/bin/bash: .../missing: No such file or directory`) hit
 # when Makefile.am had just changed and `make` was invoked via
 # run_command() before a host-side regeneration ran first; the SAME
-# failure will recur any time this happens again. No clean fix without
-# either breaking the established /projects/<name> mounting
-# convention (mounting this repo at its own real host path instead)
-# or accepting the constraint -- accepting it, documented as a
-# standing rule instead: after ANY Makefile.am/configure.ac edit,
-# regenerate on the real HOST first (`make`, or `./autogen.sh &&
-# ./configure`) BEFORE the next run_command()/run_in_directory() call
-# that invokes `make` -- never the other way around.
+# failure will recur any time this happens again.
+#
+# NOT fixable by switching this specific piece to a relative path
+# instead (checked directly, not assumed, when this exact question
+# came up 2026-08-09): Automake's OWN generated aclocal.m4 forces
+# this one absolute on purpose, via its own AM_AUX_DIR_EXPAND macro
+# (`am_aux_dir=`cd $ac_aux_dir && pwd``) -- its own comment explains
+# why: a relative $ac_aux_dir/missing path breaks in subdirectory and
+# VPATH (out-of-tree) builds, which Automake considers the WORSE
+# failure mode of the two. This isn't project-controlled code, it's
+# generated Automake machinery this project's own Makefile.am has no
+# lever over. No clean fix without either breaking the established
+# /projects/<name> mounting convention (mounting this repo at its own
+# real host path instead) or accepting the constraint -- accepting
+# it, documented as a standing rule instead: after ANY
+# Makefile.am/configure.ac edit, regenerate on the real HOST first
+# (`make`, or `./autogen.sh && ./configure`) BEFORE the next
+# run_command()/run_in_directory() call that invokes `make` -- never
+# the other way around.
 
 .PHONY: help build build-extension build-all start stop restart logs status health-check push
 
