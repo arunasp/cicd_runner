@@ -60,12 +60,19 @@ make all                # build everything (runner + extension) + launch
 
 ```bash
 make logs
-curl http://localhost:1444/mcp
+curl -i http://localhost:1444/mcp
 ```
 
-A `406` response with a `"Client must accept text/event-stream"` body
-is expected — it confirms the streamable-HTTP transport is enforcing
-its protocol correctly. See [Installation](#installation) for the
+```
+HTTP/1.1 406 Not Acceptable
+...
+{"jsonrpc":"2.0","id":"server-error","error":{"code":-32600,"message":"Not Acceptable: Client must accept text/event-stream"}}
+```
+
+That `406`/JSON-RPC error is expected — a plain `curl` isn't a real MCP
+client (it doesn't send `Accept: text/event-stream`), so this just
+confirms the streamable-HTTP transport is enforcing its protocol
+correctly, not a failure. See [Installation](#installation) for the
 full walkthrough, including connecting an actual MCP client.
 
 ## Installation
@@ -88,12 +95,21 @@ make all                # build everything (runner + extension) + launch
 ```bash
 make status   # confirm the container is up
 make logs     # follow the coordinator's own logs
-curl http://localhost:1444/mcp
+curl -i http://localhost:1444/mcp
 ```
 
-A `406` response with a `"Client must accept text/event-stream"` body
-is expected from that `curl` — it confirms the streamable-HTTP
-transport is enforcing its protocol correctly, not an error.
+```
+HTTP/1.1 406 Not Acceptable
+...
+{"jsonrpc":"2.0","id":"server-error","error":{"code":-32600,"message":"Not Acceptable: Client must accept text/event-stream"}}
+```
+
+That `406`/JSON-RPC error from `curl` is expected, not a failure —
+see the same note under [Quick start](#quick-start): a plain `curl`
+doesn't send the `Accept: text/event-stream` header a real MCP client
+would, so the coordinator correctly refuses it. This just confirms
+the streamable-HTTP transport is enforcing its protocol, not
+something broken.
 
 Day-to-day, `make start` / `make stop` / `make restart` cover
 relaunching without a full rebuild; `make build` rebuilds the Docker
