@@ -11,6 +11,9 @@ disposable ephemeral containers.
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [Installation](#installation)
+  - [Get the service running](#get-the-service-running)
+  - [Full verification (deploy_cicd_runner.sh)](#full-verification-deploy_cicd_runnersh)
+  - [Connect a client](#connect-a-client)
   - [Claude Desktop](#claude-desktop)
   - [opencode (project scope)](#opencode-project-scope)
 - [Architecture](#architecture)
@@ -62,13 +65,61 @@ curl http://localhost:1444/mcp
 
 A `406` response with a `"Client must accept text/event-stream"` body
 is expected — it confirms the streamable-HTTP transport is enforcing
-its protocol correctly.
+its protocol correctly. See [Installation](#installation) for the
+full walkthrough, including connecting an actual MCP client.
 
 ## Installation
 
-The service itself (coordinator + worker) is running once [Quick
-start](#quick-start) above completes. What's below connects an actual
-MCP client to it — pick whichever you use.
+The service itself (coordinator + worker) has to actually be running
+before any client can connect to it.
+
+### Get the service running
+
+For first-time setup or everyday use:
+
+```bash
+cp .env.example .env   # fill in real project paths (optional -- can stay empty)
+make all                # build everything (runner + extension) + launch
+```
+
+`make all` builds both Docker images and starts the coordinator via
+`start.sh` (see [Build script](#build-script)). Once it's done:
+
+```bash
+make status   # confirm the container is up
+make logs     # follow the coordinator's own logs
+curl http://localhost:1444/mcp
+```
+
+A `406` response with a `"Client must accept text/event-stream"` body
+is expected from that `curl` — it confirms the streamable-HTTP
+transport is enforcing its protocol correctly, not an error.
+
+Day-to-day, `make start` / `make stop` / `make restart` cover
+relaunching without a full rebuild; `make build` rebuilds the Docker
+images first if the coordinator or worker source changed.
+
+### Full verification (`deploy_cicd_runner.sh`)
+
+`./deploy_cicd_runner.sh` is a different tool for a different job —
+not a lighter alternative to `make all`, a heavier one. It runs the
+entire Autotools chain (`autogen.sh`, `configure`, `make`,
+`make check`, a staged `make install`/`make uninstall` round-trip,
+`make dist`), a re-scrub check for accidentally-reintroduced personal
+information (relevant to this repo's own maintainers, not to a fresh
+clone), and a full stop/start lifecycle check — logging everything to
+a timestamped file under `logs/` rather than the terminal. Reach for
+it after changing the project itself and wanting confidence nothing
+broke, not as the first thing to run on a fresh checkout.
+
+It does rebuild and relaunch the coordinator as part of that lifecycle
+check, so **any already-connected client needs to reconnect
+afterward** — the Desktop extension does this automatically (see
+[Status](#status)); other clients need a manual toggle/restart.
+
+### Connect a client
+
+With the service running, pick whichever client you use:
 
 ### Claude Desktop
 
