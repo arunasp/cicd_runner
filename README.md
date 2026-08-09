@@ -10,7 +10,11 @@ disposable ephemeral containers.
 - [Why a separate service](#why-a-separate-service)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Installation](#installation)
+  - [Claude Desktop](#claude-desktop)
+  - [opencode (project scope)](#opencode-project-scope)
 - [Architecture](#architecture)
+- [The Makefile as CI/CD manifest](#the-makefile-as-cicd-manifest)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Per-project worker images](#per-project-worker-images)
@@ -59,6 +63,78 @@ curl http://localhost:1444/mcp
 A `406` response with a `"Client must accept text/event-stream"` body
 is expected — it confirms the streamable-HTTP transport is enforcing
 its protocol correctly.
+
+## Installation
+
+The service itself (coordinator + worker) is running once [Quick
+start](#quick-start) above completes. What's below connects an actual
+MCP client to it — pick whichever you use.
+
+### Claude Desktop
+
+1. Get the `.mcpb` package, either:
+   - `make build-extension` (needs Node — builds
+     `desktop-extension/dist/cicd-runner-<version>.mcpb`), or
+   - download the latest one from this repo's
+     [Releases](../../releases) — no Node needed.
+2. Open Claude Desktop → **Settings → Extensions** → drag the
+   `.mcpb` file in, or use the **Install Extension** file picker.
+3. Claude Desktop shows the extension's one configurable option,
+   **Additional Allowed Directories** — a directory picker
+   (`manifest.json`'s own `user_config.allowed_directories`). This is
+   optional: leave it empty if you'll only ever reach named/mounted
+   projects and their own `opencode.json` `external_directory` rules
+   (see [Directory ACLs](#directory-acls)). Add directories here for
+   anything else `run_in_directory()` needs to reach.
+4. Enable the extension. Ask Claude to call `list_projects()` to
+   confirm the connection — it should return your named projects (or
+   "No projects mounted" if none are configured yet, which is still a
+   successful connection).
+
+No further host-side setup: the extension talks to the coordinator
+directly over `localhost:1444`, bridging Desktop's own stdio extension
+model to the coordinator's streamable-HTTP endpoint in-process — see
+[Status](#status) for what happens across a coordinator restart.
+
+### opencode (project scope)
+
+opencode reads MCP server config from `opencode.json` (or
+`opencode.jsonc`) two places: `~/.config/opencode/opencode.json`
+(global, every project) and `<project-root>/opencode.json`
+(project-scoped, overrides/extends the global one for that project
+only). Project scope is almost always what you want for cicd-runner —
+it keeps the connector's reach tied to the one project you're actually
+working in, not every opencode session on the machine.
+
+1. In the project's own root (next to its `package.json`/`Cargo.toml`/
+   etc., not `~/.config/`), create or edit `opencode.json`:
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "mcp": {
+       "cicd-runner": {
+         "type": "remote",
+         "url": "http://localhost:1444/mcp",
+         "enabled": true
+       }
+     }
+   }
+   ```
+
+   `examples/opencode.mcp-example.json` in this repo has the same
+   block ready to copy.
+2. Restart opencode (or start a new session) in that project
+   directory so it picks up the file.
+3. Run `/status` inside opencode, or ask it to call `list_projects()`
+   directly, to confirm `cicd-runner` shows as connected.
+
+opencode connects to the coordinator directly over HTTP — no bridge
+process, unlike the Desktop extension. It's also the one client this
+repo confirms genuinely supports the MCP roots protocol (see rule #1
+in [Directory ACLs](#directory-acls)): its own project directory is
+usually already reachable with no extra config, on top of whatever
+`external_directory` rules a project's `opencode.json` declares.
 
 ## Architecture
 
@@ -109,17 +185,96 @@ helpers.
 **`server/allowlist.txt`** — one list gating both tools; see
 [Design decisions](#design-decisions).
 
+## The Makefile as CI/CD manifest
+
+cicd-runner has no pipeline-definition format of its own — no YAML,
+no DSL, no config schema describing stages. A project's `Makefile`
+*is* the pipeline. `run_command`/`run_in_directory` call `make lint`,
+`make test`, `make build`, exactly as a human would at a terminal —
+the manifest a CI system reads and the interface a developer runs
+locally are the same file, not two representations kept in sync by
+hand.
+
+This isn't a new idea; it's a well-established pattern this project
+deliberately follows rather than inventing something bespoke:
+
+- **GNU Coding Standards** define `all`, `check`, `install`, and
+  `clean` as the standard target names any GNU-compliant `Makefile`
+  should provide — cicd-runner's own build (see [Standard build
+  (Autotools)](#standard-build-autotools)) follows this directly, and
+  the project-level `lint`/`test`/`build`/`deploy`/`verify`/`e2e`/`all`
+  vocabulary extends the same idea to a fuller pipeline shape.
+- **Kubernetes and most CNCF projects** drive their own CI through a
+  root `Makefile` (`make test`, `make verify`, `make build`) that CI
+  YAML calls as a single step, rather than encoding build logic
+  directly in the CI config. The `Makefile` stays the actual source
+  of truth and runs identically on a laptop and in CI.
+- **GitHub Actions', GitLab CI's, and Jenkins'** own `container:`,
+  `image:`, and per-stage agent-image mechanisms all solve the same
+  problem cicd-runner's own `.cicd-image` file does (see [Per-project
+  worker images](#per-project-worker-images)) — pick a toolchain image
+  per job/stage rather than one shared image trying to hold every
+  language at once.
+
+The practical payoff: a project that already has a working
+`lint`/`test`/`build` `Makefile` needs zero changes to work with
+cicd-runner. One that doesn't gets one from `examples/project-skeleton/`
+(stubbed, fails loudly until filled in) or an already-complete
+reference from `examples/hello-bash/`, `hello-gcc/`, `hello-python/`,
+or `hello-typescript/` — copy the closest match, replace the recipe
+bodies with real commands, and the pipeline exists.
+
+### Walkthrough: a project with no `Makefile` at all
+
+Taking a plain Python project (`hello.py`, `test_hello.py`, no build
+tooling yet) from nothing to a working pipeline:
+
+1. Copy the skeleton in:
+   ```bash
+   cp examples/project-skeleton/Makefile /path/to/my-project/Makefile
+   ```
+2. Fill in the real commands — delete each `TODO`/`exit 1` stub and
+   replace it with what you'd actually type at a terminal:
+   ```makefile
+   lint:
+   	ruff check .
+
+   test:
+   	pytest
+
+   build:
+   	python3 -m py_compile hello.py
+   ```
+   Leave `deploy`/`verify` as-is (`exit 1`) until there's a real
+   deploy target — `lint`/`test`/`build` alone are already a working
+   pipeline; see `examples/hello-python/Makefile` for a complete
+   reference including a real `deps` step (see [Dependency
+   caching](#dependency-caching)).
+3. If the project needs a dependency install step, add one and make
+   `test`/`lint` depend on it (matching `examples/hello-python/`'s own
+   `.deps` pattern) rather than assuming tools are already present.
+4. Run it directly first, outside cicd-runner, to confirm the
+   `Makefile` itself works: `make lint && make test && make build`.
+5. Run it through cicd-runner — no code changes needed, the same
+   `Makefile` is now the pipeline definition:
+   ```
+   run_in_directory(relative_path="my-project", binary="make", args=["lint"])
+   run_in_directory(relative_path="my-project", binary="make", args=["test"])
+   ```
+   (`relative_path` is relative to `DYNAMIC_ROOT` — see
+   [Usage](#usage). For a project that also needs
+   `run_command()`'s docker-compose-build visibility, see [Adding a
+   new named project](#adding-a-new-named-project) instead.)
+
+That's the whole integration surface — nothing to register, no
+separate CI config to write or keep in sync. The `Makefile` written
+in step 2 is the same one a teammate runs locally and the same one
+CI calls.
+
 ## Usage
 
-**Claude Desktop**: build `desktop-extension/dist/cicd-runner-<version>.mcpb`
-via `make build-extension`, or download it from this repo's
-[Releases](../../releases). `index.js` bridges Desktop's stdio
-extension model to this server's streamable-HTTP endpoint directly,
-using `@modelcontextprotocol/sdk`'s own transports in-process.
-
-**opencode**: add `examples/opencode.mcp-example.json`'s `mcp` block to
-your `opencode.json` (global or project-root) — opencode connects
-directly over HTTP, no bridge needed.
+Connect a client first — see [Installation](#installation) for Claude
+Desktop and opencode. Once connected:
 
 ```
 list_projects()
