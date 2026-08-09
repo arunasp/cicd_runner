@@ -27,12 +27,11 @@ jobs:
         # make check depends on `all` (-> all-local -> ./build.sh ->
         # docker compose build for the coordinator stage), which needs
         # the same placeholder env vars as the docker-compose-syntax
-        # job below -- LOCUSAI_DIR/OPENCODE_MODEL_EVAL_DIR/
-        # OPENCODE_CTX_SQUID_DIR are the only three vars in
-        # docker-compose.yml with no ${VAR:-} fallback, and CI has no
-        # .env (gitignored, never committed).
+        # job below -- OPENCODE_MODEL_EVAL_DIR/OPENCODE_CTX_SQUID_DIR
+        # are the only two vars in docker-compose.yml with no
+        # ${VAR:-} fallback, and CI has no .env (gitignored, never
+        # committed).
         run: |
-          export LOCUSAI_DIR=/tmp/placeholder
           export OPENCODE_MODEL_EVAL_DIR=/tmp/placeholder
           export OPENCODE_CTX_SQUID_DIR=/tmp/placeholder
           ./autogen.sh
@@ -58,16 +57,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate docker-compose.yml
-        # LOCUSAI_DIR/OPENCODE_MODEL_EVAL_DIR/OPENCODE_CTX_SQUID_DIR are
-        # the only three vars in docker-compose.yml with no ${VAR:-}
-        # fallback -- deliberately required, real project paths for
-        # actual use, not something to default in the compose file
-        # itself. CI has no .env (gitignored, never committed) and no
-        # shell exports, so without this they'd resolve to empty
-        # strings, producing an invalid empty bind-mount source. This
-        # job only validates syntax, so any placeholder value works.
+        # OPENCODE_MODEL_EVAL_DIR/OPENCODE_CTX_SQUID_DIR are the only
+        # two vars in docker-compose.yml with no ${VAR:-} fallback --
+        # deliberately required, real project paths for actual use,
+        # not something to default in the compose file itself. CI has
+        # no .env (gitignored, never committed) and no shell exports,
+        # so without this they'd resolve to empty strings, producing
+        # an invalid empty bind-mount source. This job only validates
+        # syntax, so any placeholder value works.
         run: |
-          LOCUSAI_DIR=/tmp/placeholder \
           OPENCODE_MODEL_EVAL_DIR=/tmp/placeholder \
           OPENCODE_CTX_SQUID_DIR=/tmp/placeholder \
           docker compose -f docker-compose.yml config

@@ -24,7 +24,8 @@ Two ways to run a command, for two genuinely different needs:
   invoking `docker run` -- skipping that check would silently create
   an empty directory at a nonexistent host path (Docker's own
   bind-mount behavior), the exact "phantom mount" bug already found
-  and fixed for LocusAI's ssh key mount in this same project family.
+  and fixed for an ssh key mount in a sibling project in this same
+  family.
   All actual read/write happens in the worker against the REAL host
   path, not through this read-only view.
 
@@ -143,13 +144,14 @@ behavior when unset (e.g. rootless Docker setups may not need this at
 all) -- same pattern as CACHE_ROOT_HOST, not a hard requirement.
 
 This container also mounts /var/run/docker.sock so `docker` is usable
-from inside it -- unlike LocusAI's own container, which deliberately
-does NOT have docker/npm/npx on its allowlist, for exactly this
-reason: a project's own container cannot safely rebuild itself (the
-RPC connection serving the rebuild request dies mid-rebuild). This
-runner is a separate container from every project it builds, so
-rebuilding e.g. LocusAI's local-bash service is runner-container (A)
-acting on project-container (B) -- no self-rebuild, no chicken-and-egg.
+from inside it -- unlike a named project's own container might,
+which should deliberately NOT have docker/npm/npx on its allowlist,
+for exactly this reason: a project's own container cannot safely
+rebuild itself (the RPC connection serving the rebuild request dies
+mid-rebuild). This runner is a separate container from every project
+it builds, so rebuilding e.g. a named project's own local-bash
+service is runner-container (A) acting on project-container (B) --
+no self-rebuild, no chicken-and-egg.
 """
 
 import fnmatch

@@ -1,10 +1,9 @@
 # Do NOT run `docker compose`/`docker-compose` directly against this
-# file without checking start.sh first for the same reason as
-# LocusAI's docker-compose.yml: recreating an existing container
-# in place can hit docker-compose v1's `KeyError: 'ContainerConfig'`
-# bug (docker/compose#11742) after a rebuild. Prefer start.sh
-# (builds both the coordinator AND the worker image) or
-# `docker compose build && docker compose up -d` with an explicit
+# file without checking start.sh first: recreating an existing
+# container in place can hit docker-compose v1's `KeyError:
+# 'ContainerConfig'` bug (docker/compose#11742) after a rebuild.
+# Prefer start.sh (builds both the coordinator AND the worker image)
+# or `docker compose build && docker compose up -d` with an explicit
 # `docker compose rm -sf` first.
 services:
   cicd-runner:
@@ -67,8 +66,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Named-project mounts -- kept for run_command()'s own
       # docker-compose-build use case (needs coordinator-visible build
-      # context, not just a host path handed to the daemon).
-      - ${LOCUSAI_DIR}:/projects/LocusAI
+      # context, not just a host path handed to the daemon). Add your
+      # own here following the same pattern -- see "Adding a new named
+      # project" in README.md and examples/project-skeleton/.
       - ${OPENCODE_MODEL_EVAL_DIR}:/projects/opencode-model-eval
       - ${OPENCODE_CTX_SQUID_DIR}:/projects/opencode-plugin-ctx-squid
       # Read-only, existence-check ONLY -- run_in_directory() never

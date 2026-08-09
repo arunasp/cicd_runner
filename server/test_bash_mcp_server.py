@@ -27,7 +27,7 @@ import bash_mcp_server as srv  # noqa: E402
 def projects_root(tmp_path, monkeypatch):
     root = tmp_path / "projects"
     root.mkdir()
-    (root / "LocusAI").mkdir()
+    (root / "SampleProject").mkdir()
     (root / "opencode-model-eval").mkdir()
     monkeypatch.setattr(srv, "PROJECTS_ROOT", root)
     return root
@@ -48,7 +48,7 @@ def dynamic_root(tmp_path, monkeypatch):
 
 class TestResolveProjectDir:
     def test_valid_project(self, projects_root):
-        assert srv._resolve_project_dir("LocusAI") == projects_root / "LocusAI"
+        assert srv._resolve_project_dir("SampleProject") == projects_root / "SampleProject"
 
     def test_another_valid_project(self, projects_root):
         assert srv._resolve_project_dir("opencode-model-eval") is not None
@@ -60,7 +60,7 @@ class TestResolveProjectDir:
         assert srv._resolve_project_dir("../../etc") is None
 
     def test_traversal_that_stays_inside_root_resolves(self, projects_root):
-        result = srv._resolve_project_dir("LocusAI/../opencode-model-eval")
+        result = srv._resolve_project_dir("SampleProject/../opencode-model-eval")
         assert result == projects_root / "opencode-model-eval"
 
 
@@ -253,27 +253,27 @@ class TestMatchExternalDirectory:
         assert srv._match_external_directory("/some/path", {}) == "ask"
 
     def test_single_allow_match(self):
-        rules = {"/home/arunasp/stuff/LocusAI/**": "allow"}
-        assert srv._match_external_directory("/home/arunasp/stuff/LocusAI/tools", rules) == "allow"
+        rules = {"/home/arunasp/stuff/SampleProject/**": "allow"}
+        assert srv._match_external_directory("/home/arunasp/stuff/SampleProject/tools", rules) == "allow"
 
     def test_non_matching_path_defaults_to_ask(self):
-        rules = {"/home/arunasp/stuff/LocusAI/**": "allow"}
+        rules = {"/home/arunasp/stuff/SampleProject/**": "allow"}
         assert srv._match_external_directory("/home/arunasp/stuff/other", rules) == "ask"
 
     def test_last_match_wins_deny_after_allow(self):
         rules = {
-            "/home/arunasp/stuff/LocusAI/**": "allow",
-            "/home/arunasp/stuff/LocusAI/secrets/**": "deny",
+            "/home/arunasp/stuff/SampleProject/**": "allow",
+            "/home/arunasp/stuff/SampleProject/secrets/**": "deny",
         }
-        assert srv._match_external_directory("/home/arunasp/stuff/LocusAI/tools", rules) == "allow"
-        assert srv._match_external_directory("/home/arunasp/stuff/LocusAI/secrets/x", rules) == "deny"
+        assert srv._match_external_directory("/home/arunasp/stuff/SampleProject/tools", rules) == "allow"
+        assert srv._match_external_directory("/home/arunasp/stuff/SampleProject/secrets/x", rules) == "deny"
 
     def test_last_match_wins_allow_after_deny(self):
         rules = {
             "/home/arunasp/stuff/**": "deny",
-            "/home/arunasp/stuff/LocusAI/**": "allow",
+            "/home/arunasp/stuff/SampleProject/**": "allow",
         }
-        assert srv._match_external_directory("/home/arunasp/stuff/LocusAI/tools", rules) == "allow"
+        assert srv._match_external_directory("/home/arunasp/stuff/SampleProject/tools", rules) == "allow"
         assert srv._match_external_directory("/home/arunasp/stuff/other", rules) == "deny"
 
 
@@ -395,7 +395,7 @@ class TestIsPathAllowed:
 
     @pytest.mark.asyncio
     async def test_allowed_via_known_project_external_directory(self, projects_root):
-        (projects_root / "LocusAI" / "opencode.json").write_text(json.dumps({
+        (projects_root / "SampleProject" / "opencode.json").write_text(json.dumps({
             "permission": {"external_directory": {"/home/arunasp/stuff/sibling/**": "allow"}}
         }))
         ctx = FakeCtx(FakeSession(False, []))
@@ -415,7 +415,7 @@ class TestIsPathAllowed:
 
     @pytest.mark.asyncio
     async def test_project_with_deny_rule_is_refused(self, projects_root):
-        (projects_root / "LocusAI" / "opencode.json").write_text(json.dumps({
+        (projects_root / "SampleProject" / "opencode.json").write_text(json.dumps({
             "permission": {"external_directory": {"/home/arunasp/stuff/sibling/**": "deny"}}
         }))
         ctx = FakeCtx(FakeSession(False, []))
@@ -480,8 +480,8 @@ class TestIsPathAllowed:
 class TestTranslateWindowsPath:
     def test_wsl_localhost_unc_path(self):
         assert srv._translate_windows_path(
-            r"\\wsl.localhost\Ubuntu\home\arunasp\stuff\LocusAI"
-        ) == "/home/arunasp/stuff/LocusAI"
+            r"\\wsl.localhost\Ubuntu\home\arunasp\stuff\SampleProject"
+        ) == "/home/arunasp/stuff/SampleProject"
 
     def test_legacy_wsl_dollar_unc_path(self):
         assert srv._translate_windows_path(
@@ -516,9 +516,9 @@ class TestParseAllowedDirectoriesHeader:
         assert result == ["/mnt/d/Users/T-1000/dev"]
 
     def test_multiple_comma_separated_entries(self):
-        header = r"\\wsl.localhost\Ubuntu\home\arunasp\stuff\LocusAI,D:\Users\T-1000\dev"
+        header = r"\\wsl.localhost\Ubuntu\home\arunasp\stuff\SampleProject,D:\Users\T-1000\dev"
         result = srv._parse_allowed_directories_header(header)
-        assert result == ["/home/arunasp/stuff/LocusAI", "/mnt/d/Users/T-1000/dev"]
+        assert result == ["/home/arunasp/stuff/SampleProject", "/mnt/d/Users/T-1000/dev"]
 
     def test_whitespace_around_entries_stripped(self):
         header = r"D:\Users\a , D:\Users\b"

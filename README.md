@@ -164,7 +164,7 @@ All configuration lives in `.env` (copy from `.env.example`):
 
 | Variable | Purpose |
 |---|---|
-| `LOCUSAI_DIR`, etc. | Host path for each named project mount |
+| `OPENCODE_MODEL_EVAL_DIR`, etc. | Host path for each named project mount |
 | `CACHE_ROOT` | Optional dependency-cache directory (see below) |
 
 `DYNAMIC_ROOT` (the root directory `run_in_directory()` can reach) and
