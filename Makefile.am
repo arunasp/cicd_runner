@@ -44,46 +44,47 @@ all-local:
 # extension, and doing it once at configure time is cheaper anyway.
 COMPOSE = @COMPOSE_CMD@
 
-# KNOWN LIMITATION, not fully fixed (found live 2026-08-09, while
-# adding the push/health-check targets below): Autotools bakes
-# ABSOLUTE host paths into the generated Makefile at ./configure
-# time -- not just $(srcdir)/$(abs_srcdir) (which resolve fine either
-# way, since most recipes use the RELATIVE $(srcdir)="."), but the
-# derived ACLOCAL/AUTOCONF/AUTOMAKE/AUTOHEADER/MAKEINFO variables
-# specifically, which are substituted as e.g.
-# `${SHELL} '/home/arunasp/stuff/cicd_runner/missing' automake-1.16`
-# -- a genuine absolute path. This repo mounts itself into the
-# coordinator at a DIFFERENT absolute path (/projects/cicd_runner,
-# see docker-compose.yml's own self-mount) than wherever it actually
-# lives on the real host (confirmed live: /home/arunasp/stuff/
-# cicd_runner) -- so those baked host-absolute paths don't exist
-# inside the container. This stays LATENT, not visibly broken, as
-# long as Makefile.am/configure.ac are already up to date relative to
-# the generated Makefile (Automake's own standard auto-regeneration
-# chain, `Makefile: Makefile.in Makefile.am ...`, simply never fires
-# in that case) -- confirmed exactly this way live: a real regeneration
-# failure (`/bin/bash: .../missing: No such file or directory`) hit
-# when Makefile.am had just changed and `make` was invoked via
-# run_command() before a host-side regeneration ran first; the SAME
-# failure will recur any time this happens again.
+# FIXED 2026-08-09 (was a KNOWN LIMITATION until Arunas asked "what
+# if we define missing becoming defined" -- correct instinct, and a
+# real, working fix): Autotools bakes ABSOLUTE host paths into the
+# generated Makefile at ./configure time -- not just
+# $(srcdir)/$(abs_srcdir) (which resolve fine either way, since most
+# recipes use the RELATIVE $(srcdir)="."), but the derived
+# ACLOCAL/AUTOCONF/AUTOMAKE/AUTOHEADER/MAKEINFO variables
+# specifically, e.g. `${SHELL} '/home/arunasp/stuff/cicd_runner/
+# missing' automake-1.16`. This repo mounts itself into the
+# coordinator at a DIFFERENT absolute path (/projects/cicd_runner)
+# than wherever it actually lives on the real host -- so those baked
+# host-absolute paths didn't exist inside the container, causing a
+# real, confirmed regeneration failure (`/bin/bash: .../missing: No
+# such file or directory`) whenever Makefile.am/configure.ac had just
+# changed and `make` was invoked via run_command() before a host-side
+# regeneration ran first.
 #
-# NOT fixable by switching this specific piece to a relative path
-# instead (checked directly, not assumed, when this exact question
-# came up 2026-08-09): Automake's OWN generated aclocal.m4 forces
-# this one absolute on purpose, via its own AM_AUX_DIR_EXPAND macro
-# (`am_aux_dir=`cd $ac_aux_dir && pwd``) -- its own comment explains
-# why: a relative $ac_aux_dir/missing path breaks in subdirectory and
-# VPATH (out-of-tree) builds, which Automake considers the WORSE
-# failure mode of the two. This isn't project-controlled code, it's
-# generated Automake machinery this project's own Makefile.am has no
-# lever over. No clean fix without either breaking the established
-# /projects/<name> mounting convention (mounting this repo at its own
-# real host path instead) or accepting the constraint -- accepting
-# it, documented as a standing rule instead: after ANY
-# Makefile.am/configure.ac edit, regenerate on the real HOST first
-# (`make`, or `./autogen.sh && ./configure`) BEFORE the next
-# run_command()/run_in_directory() call that invokes `make` -- never
-# the other way around.
+# Fixed at the source, in configure.ac, not worked around here:
+# MISSING/ACLOCAL/AUTOCONF/AUTOMAKE/AUTOHEADER/MAKEINFO are now
+# pre-set to RELATIVE paths before AM_INIT_AUTOMAKE expands its own
+# AM_MISSING_PROG calls -- both that macro and AM_MISSING_HAS_RUN use
+# the standard shell "only if not already set" pattern
+# (`${VAR-default}`/`${VAR+set}`, confirmed by reading the real
+# generated aclocal.m4 directly), so a pre-set value is respected
+# instead of Automake's own absolute default. Automake defaults to
+# absolute specifically to survive subdirectory/VPATH (out-of-tree)
+# builds -- this project has neither (flat layout, no SUBDIRS, srcdir
+# always equals builddir), so that protection buys nothing here while
+# it was actively breaking the real case this project DOES hit.
+# Verified end-to-end before applying, not just reasoned about: a
+# real, isolated reproduction (same structural bug, a checkout copied
+# to a different absolute path after ./configure ran) failed exactly
+# as this project did, without the override, then succeeded cleanly
+# with it. See configure.ac's own comment for the fix itself.
+#
+# Since this changes configure.ac, it needs regenerating on the real
+# host once (`make`, or `./autogen.sh && ./configure`) before the fix
+# itself takes effect -- after that, the standing regenerate-on-host-
+# first discipline this comment used to require is no longer needed
+# for THIS specific failure (though still generally sound practice
+# after any Makefile.am/configure.ac edit).
 
 .PHONY: help build build-extension build-all start stop restart logs status health-check push
 

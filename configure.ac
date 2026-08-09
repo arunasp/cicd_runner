@@ -11,6 +11,41 @@ dnl else about this specific project.
 AC_PREREQ([2.71])
 AC_INIT([cicd-runner], [1.0.0], [https://github.com/arunasp/cicd_runner/issues])
 AC_CONFIG_SRCDIR([server/bash_mcp_server.py])
+
+dnl Force Automake's own maintainer-tool variables (MISSING itself,
+dnl plus ACLOCAL/AUTOCONF/AUTOMAKE/AUTOHEADER/MAKEINFO, each set via
+dnl its own AM_MISSING_PROG call inside AM_INIT_AUTOMAKE below) to
+dnl RELATIVE paths, overriding Automake's own default of always-
+dnl absolute (AM_AUX_DIR_EXPAND's `cd $ac_aux_dir && pwd`). Automake
+dnl defaults to absolute deliberately, to survive subdirectory/VPATH
+dnl (out-of-tree) builds -- this project has neither (flat layout, no
+dnl SUBDIRS, srcdir always equals builddir), so that protection buys
+dnl nothing here while actively breaking a real, different case this
+dnl project DOES hit: the same checkout bind-mounted into cicd-runner's
+dnl own coordinator at a different absolute path than on the real
+dnl host (confirmed live 2026-08-09 -- see Makefile.am's own comment
+dnl for the original failure). Both AM_MISSING_PROG and
+dnl AM_MISSING_HAS_RUN use the standard shell "only if not already
+dnl set" pattern (`${VAR-default}` / `${VAR+set}`, confirmed by
+dnl reading the real, generated aclocal.m4 directly, not assumed) --
+dnl pre-setting these here, in plain shell before AM_INIT_AUTOMAKE
+dnl expands its own AM_MISSING_PROG calls, means Automake respects
+dnl the override instead of computing its own absolute default.
+dnl Verified end-to-end in a real, isolated reproduction before
+dnl applying here: modified Makefile.am, copied the whole checkout to
+dnl a DIFFERENT absolute path (simulating the host-vs-container
+dnl mismatch exactly), ran `make` from the new path -- Automake's own
+dnl auto-regeneration chain fired and succeeded correctly, where it
+dnl previously failed with "No such file or directory" on the old,
+dnl host-only absolute path.
+MISSING='${SHELL} missing'
+ACLOCAL='${SHELL} missing --run aclocal-1.16'
+AUTOCONF='${SHELL} missing --run autoconf'
+AUTOMAKE='${SHELL} missing --run automake-1.16'
+AUTOHEADER='${SHELL} missing --run autoheader'
+MAKEINFO='${SHELL} missing --run makeinfo'
+export MISSING ACLOCAL AUTOCONF AUTOMAKE AUTOHEADER MAKEINFO
+
 AM_INIT_AUTOMAKE([foreign -Wall -Werror])
 
 dnl docker itself is not optional -- real docker-socket access is
