@@ -104,6 +104,44 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Added 2026-08-09, after a real incident: a v1.0.0 tag had been
+      # created locally (git tag) but never pushed, so the check above
+      # correctly saw no existing remote tag and this job correctly
+      # created a release -- but AC_INIT's own version had also never
+      # been bumped since that local tag was made, so the resulting
+      # release ended up labeled v1.0.0 against a much later commit
+      # than what that version number had originally meant. This step
+      # doesn't (and structurally can't) catch THAT specific case --
+      # CI has no visibility into a tag that was never pushed -- but it
+      # closes the more common, ongoing risk: forgetting to bump
+      # AC_INIT on a LATER push, after tags are already properly
+      # synced with the remote. Compares via `sort -V` (real version
+      # ordering, not plain string comparison -- confirmed 1.9.0 <
+      # 1.10.0 sorts correctly, unlike a naive string compare) against
+      # the latest existing tag; fails loudly rather than silently
+      # creating a release for a stale or backwards version number. No
+      # existing tags at all (a genuine first release) is not an error.
+      - name: Verify the version is newer than the latest existing tag
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          current_version="${{ steps.version.outputs.version }}"
+          latest_tag=$(git tag --list 'v*' | sort -V | tail -1)
+          if [ -z "$latest_tag" ]; then
+            echo "No existing tags -- first release, proceeding."
+            exit 0
+          fi
+          latest_version="${latest_tag#v}"
+          if [ "$latest_version" = "$current_version" ]; then
+            echo "ERROR: configure.ac's AC_INIT version ($current_version) equals the latest existing tag ($latest_tag) -- bump AC_INIT before pushing." >&2
+            exit 1
+          fi
+          highest=$(printf '%s\n%s\n' "$latest_version" "$current_version" | sort -V | tail -1)
+          if [ "$highest" != "$current_version" ]; then
+            echo "ERROR: configure.ac's AC_INIT version ($current_version) is not newer than the latest existing tag ($latest_tag) -- bump AC_INIT before pushing." >&2
+            exit 1
+          fi
+          echo "Version $current_version is newer than latest tag $latest_tag -- OK."
+
       - name: Build the dist tarball
         if: steps.check.outputs.exists == 'false'
         run: |
