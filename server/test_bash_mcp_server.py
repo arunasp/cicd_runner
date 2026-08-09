@@ -28,7 +28,7 @@ def projects_root(tmp_path, monkeypatch):
     root = tmp_path / "projects"
     root.mkdir()
     (root / "SampleProject").mkdir()
-    (root / "opencode-model-eval").mkdir()
+    (root / "AnotherProject").mkdir()
     monkeypatch.setattr(srv, "PROJECTS_ROOT", root)
     return root
 
@@ -51,7 +51,7 @@ class TestResolveProjectDir:
         assert srv._resolve_project_dir("SampleProject") == projects_root / "SampleProject"
 
     def test_another_valid_project(self, projects_root):
-        assert srv._resolve_project_dir("opencode-model-eval") is not None
+        assert srv._resolve_project_dir("AnotherProject") is not None
 
     def test_nonexistent_project(self, projects_root):
         assert srv._resolve_project_dir("nonexistent") is None
@@ -60,8 +60,8 @@ class TestResolveProjectDir:
         assert srv._resolve_project_dir("../../etc") is None
 
     def test_traversal_that_stays_inside_root_resolves(self, projects_root):
-        result = srv._resolve_project_dir("SampleProject/../opencode-model-eval")
-        assert result == projects_root / "opencode-model-eval"
+        result = srv._resolve_project_dir("SampleProject/../AnotherProject")
+        assert result == projects_root / "AnotherProject"
 
 
 class TestResolveWorkerImage:
@@ -107,18 +107,18 @@ class TestCacheMountFlags:
         assert srv._cache_mount_flags() == []
 
     def test_cache_root_configured_returns_all_four_mounts(self, monkeypatch):
-        monkeypatch.setattr(srv, "CACHE_ROOT_HOST", "/home/arunasp/.cicd-runner-cache")
+        monkeypatch.setattr(srv, "CACHE_ROOT_HOST", "/home/devuser/.cicd-runner-cache")
         flags = srv._cache_mount_flags()
         joined = " ".join(flags)
-        assert "-v /home/arunasp/.cicd-runner-cache/npm:/cache/npm" in joined
-        assert "-v /home/arunasp/.cicd-runner-cache/cargo-registry:/cache/cargo/registry" in joined
-        assert "-v /home/arunasp/.cicd-runner-cache/cargo-git:/cache/cargo/git" in joined
-        assert "-v /home/arunasp/.cicd-runner-cache/pip:/cache/pip" in joined
+        assert "-v /home/devuser/.cicd-runner-cache/npm:/cache/npm" in joined
+        assert "-v /home/devuser/.cicd-runner-cache/cargo-registry:/cache/cargo/registry" in joined
+        assert "-v /home/devuser/.cicd-runner-cache/cargo-git:/cache/cargo/git" in joined
+        assert "-v /home/devuser/.cicd-runner-cache/pip:/cache/pip" in joined
 
     def test_trailing_slash_is_stripped(self, monkeypatch):
-        monkeypatch.setattr(srv, "CACHE_ROOT_HOST", "/home/arunasp/.cicd-runner-cache/")
+        monkeypatch.setattr(srv, "CACHE_ROOT_HOST", "/home/devuser/.cicd-runner-cache/")
         flags = srv._cache_mount_flags()
-        assert "/home/arunasp/.cicd-runner-cache/npm:/cache/npm" in flags
+        assert "/home/devuser/.cicd-runner-cache/npm:/cache/npm" in flags
         assert not any("//" in f for f in flags)
 
     def test_mount_targets_are_user_independent_not_under_root_or_home(self, monkeypatch):
@@ -139,7 +139,7 @@ class TestCacheEnvFlags:
         assert srv._cache_env_flags() == []
 
     def test_cache_root_configured_returns_all_three_tool_vars(self, monkeypatch):
-        monkeypatch.setattr(srv, "CACHE_ROOT_HOST", "/home/arunasp/.cicd-runner-cache")
+        monkeypatch.setattr(srv, "CACHE_ROOT_HOST", "/home/devuser/.cicd-runner-cache")
         flags = srv._cache_env_flags()
         joined = " ".join(flags)
         assert "NPM_CONFIG_CACHE=/cache/npm" in joined
@@ -232,19 +232,19 @@ class TestResolveDynamicDir:
 
 class TestExpandPattern:
     def test_home_prefix_expands(self, monkeypatch):
-        monkeypatch.setattr(srv.Path, "home", staticmethod(lambda: Path("/home/arunasp")))
-        assert srv._expand_pattern("~/stuff/foo/**") == "/home/arunasp/stuff/foo/**"
+        monkeypatch.setattr(srv.Path, "home", staticmethod(lambda: Path("/home/devuser")))
+        assert srv._expand_pattern("~/stuff/foo/**") == "/home/devuser/stuff/foo/**"
 
     def test_bare_tilde_expands(self, monkeypatch):
-        monkeypatch.setattr(srv.Path, "home", staticmethod(lambda: Path("/home/arunasp")))
-        assert srv._expand_pattern("~") == "/home/arunasp"
+        monkeypatch.setattr(srv.Path, "home", staticmethod(lambda: Path("/home/devuser")))
+        assert srv._expand_pattern("~") == "/home/devuser"
 
     def test_dollar_home_expands(self, monkeypatch):
-        monkeypatch.setattr(srv.Path, "home", staticmethod(lambda: Path("/home/arunasp")))
-        assert srv._expand_pattern("$HOME/stuff/**") == "/home/arunasp/stuff/**"
+        monkeypatch.setattr(srv.Path, "home", staticmethod(lambda: Path("/home/devuser")))
+        assert srv._expand_pattern("$HOME/stuff/**") == "/home/devuser/stuff/**"
 
     def test_absolute_pattern_unchanged(self, monkeypatch):
-        monkeypatch.setattr(srv.Path, "home", staticmethod(lambda: Path("/home/arunasp")))
+        monkeypatch.setattr(srv.Path, "home", staticmethod(lambda: Path("/home/devuser")))
         assert srv._expand_pattern("/already/absolute/**") == "/already/absolute/**"
 
 
@@ -253,28 +253,28 @@ class TestMatchExternalDirectory:
         assert srv._match_external_directory("/some/path", {}) == "ask"
 
     def test_single_allow_match(self):
-        rules = {"/home/arunasp/stuff/SampleProject/**": "allow"}
-        assert srv._match_external_directory("/home/arunasp/stuff/SampleProject/tools", rules) == "allow"
+        rules = {"/home/devuser/stuff/SampleProject/**": "allow"}
+        assert srv._match_external_directory("/home/devuser/stuff/SampleProject/tools", rules) == "allow"
 
     def test_non_matching_path_defaults_to_ask(self):
-        rules = {"/home/arunasp/stuff/SampleProject/**": "allow"}
-        assert srv._match_external_directory("/home/arunasp/stuff/other", rules) == "ask"
+        rules = {"/home/devuser/stuff/SampleProject/**": "allow"}
+        assert srv._match_external_directory("/home/devuser/stuff/other", rules) == "ask"
 
     def test_last_match_wins_deny_after_allow(self):
         rules = {
-            "/home/arunasp/stuff/SampleProject/**": "allow",
-            "/home/arunasp/stuff/SampleProject/secrets/**": "deny",
+            "/home/devuser/stuff/SampleProject/**": "allow",
+            "/home/devuser/stuff/SampleProject/secrets/**": "deny",
         }
-        assert srv._match_external_directory("/home/arunasp/stuff/SampleProject/tools", rules) == "allow"
-        assert srv._match_external_directory("/home/arunasp/stuff/SampleProject/secrets/x", rules) == "deny"
+        assert srv._match_external_directory("/home/devuser/stuff/SampleProject/tools", rules) == "allow"
+        assert srv._match_external_directory("/home/devuser/stuff/SampleProject/secrets/x", rules) == "deny"
 
     def test_last_match_wins_allow_after_deny(self):
         rules = {
-            "/home/arunasp/stuff/**": "deny",
-            "/home/arunasp/stuff/SampleProject/**": "allow",
+            "/home/devuser/stuff/**": "deny",
+            "/home/devuser/stuff/SampleProject/**": "allow",
         }
-        assert srv._match_external_directory("/home/arunasp/stuff/SampleProject/tools", rules) == "allow"
-        assert srv._match_external_directory("/home/arunasp/stuff/other", rules) == "deny"
+        assert srv._match_external_directory("/home/devuser/stuff/SampleProject/tools", rules) == "allow"
+        assert srv._match_external_directory("/home/devuser/stuff/other", rules) == "deny"
 
 
 class TestReadExternalDirectoryRules:
@@ -335,9 +335,9 @@ class TestGetClientRoots:
 
     @pytest.mark.asyncio
     async def test_client_with_roots_support_returns_paths(self):
-        session = FakeSession(True, ["/home/arunasp/stuff/opencode-model-eval"])
+        session = FakeSession(True, ["/home/devuser/stuff/AnotherProject"])
         result = await srv._get_client_roots(session)
-        assert result == ["/home/arunasp/stuff/opencode-model-eval"]
+        assert result == ["/home/devuser/stuff/AnotherProject"]
 
     @pytest.mark.asyncio
     async def test_list_roots_raising_degrades_to_empty(self):
@@ -385,10 +385,10 @@ class FakeCtx:
 class TestIsPathAllowed:
     @pytest.mark.asyncio
     async def test_within_client_own_root_is_allowed(self, projects_root):
-        session = FakeSession(True, ["/home/arunasp/stuff/opencode-model-eval"])
+        session = FakeSession(True, ["/home/devuser/stuff/AnotherProject"])
         ctx = FakeCtx(session)
         allowed, reason = await srv._is_path_allowed(
-            "/home/arunasp/stuff/opencode-model-eval/src", ctx
+            "/home/devuser/stuff/AnotherProject/src", ctx
         )
         assert allowed
         assert "connecting client's own root" in reason
@@ -396,31 +396,31 @@ class TestIsPathAllowed:
     @pytest.mark.asyncio
     async def test_allowed_via_known_project_external_directory(self, projects_root):
         (projects_root / "SampleProject" / "opencode.json").write_text(json.dumps({
-            "permission": {"external_directory": {"/home/arunasp/stuff/sibling/**": "allow"}}
+            "permission": {"external_directory": {"/home/devuser/stuff/sibling/**": "allow"}}
         }))
         ctx = FakeCtx(FakeSession(False, []))
         allowed, reason = await srv._is_path_allowed(
-            "/home/arunasp/stuff/sibling/src", ctx
+            "/home/devuser/stuff/sibling/src", ctx
         )
         assert allowed
         assert "external_directory allow" in reason
 
     @pytest.mark.asyncio
     async def test_refused_when_nothing_allows_it(self, projects_root):
-        ctx = FakeCtx(FakeSession(True, ["/home/arunasp/stuff/opencode-model-eval"]))
+        ctx = FakeCtx(FakeSession(True, ["/home/devuser/stuff/AnotherProject"]))
         allowed, reason = await srv._is_path_allowed(
-            "/home/arunasp/stuff/totally-unrelated", ctx
+            "/home/devuser/stuff/totally-unrelated", ctx
         )
         assert not allowed
 
     @pytest.mark.asyncio
     async def test_project_with_deny_rule_is_refused(self, projects_root):
         (projects_root / "SampleProject" / "opencode.json").write_text(json.dumps({
-            "permission": {"external_directory": {"/home/arunasp/stuff/sibling/**": "deny"}}
+            "permission": {"external_directory": {"/home/devuser/stuff/sibling/**": "deny"}}
         }))
         ctx = FakeCtx(FakeSession(False, []))
         allowed, reason = await srv._is_path_allowed(
-            "/home/arunasp/stuff/sibling/src", ctx
+            "/home/devuser/stuff/sibling/src", ctx
         )
         assert not allowed
 
@@ -428,10 +428,10 @@ class TestIsPathAllowed:
     async def test_allowed_via_header_wsl_interop_path(self, projects_root):
         ctx = FakeCtx(
             FakeSession(False, []),
-            headers={"X-Allowed-Directories": r"\\wsl.localhost\Ubuntu\home\arunasp\stuff\sibling"},
+            headers={"X-Allowed-Directories": r"\\wsl.localhost\Ubuntu\home\devuser\stuff\sibling"},
         )
         allowed, reason = await srv._is_path_allowed(
-            "/home/arunasp/stuff/sibling/src", ctx
+            "/home/devuser/stuff/sibling/src", ctx
         )
         assert allowed
         assert "X-Allowed-Directories header entry" in reason
@@ -450,9 +450,9 @@ class TestIsPathAllowed:
 
     @pytest.mark.asyncio
     async def test_allowed_via_header_mixed_forms(self, projects_root):
-        header = r"\\wsl.localhost\Ubuntu\home\arunasp\stuff\sibling,D:\Users\T-1000\dev\my-project"
+        header = r"\\wsl.localhost\Ubuntu\home\devuser\stuff\sibling,D:\Users\T-1000\dev\my-project"
         ctx = FakeCtx(FakeSession(False, []), headers={"X-Allowed-Directories": header})
-        allowed1, _ = await srv._is_path_allowed("/home/arunasp/stuff/sibling/src", ctx)
+        allowed1, _ = await srv._is_path_allowed("/home/devuser/stuff/sibling/src", ctx)
         allowed2, _ = await srv._is_path_allowed("/mnt/d/Users/T-1000/dev/my-project/src", ctx)
         assert allowed1
         assert allowed2
@@ -461,7 +461,7 @@ class TestIsPathAllowed:
     async def test_header_missing_degrades_to_no_grant(self, projects_root):
         ctx = FakeCtx(FakeSession(False, []))  # no headers arg -- request stays None
         allowed, reason = await srv._is_path_allowed(
-            "/home/arunasp/stuff/anything", ctx
+            "/home/devuser/stuff/anything", ctx
         )
         assert not allowed
 
@@ -472,7 +472,7 @@ class TestIsPathAllowed:
             headers={"X-Allowed-Directories": r"D:\Users\T-1000\dev\my-project"},
         )
         allowed, _ = await srv._is_path_allowed(
-            "/home/arunasp/stuff/totally-unrelated", ctx
+            "/home/devuser/stuff/totally-unrelated", ctx
         )
         assert not allowed
 
@@ -480,13 +480,13 @@ class TestIsPathAllowed:
 class TestTranslateWindowsPath:
     def test_wsl_localhost_unc_path(self):
         assert srv._translate_windows_path(
-            r"\\wsl.localhost\Ubuntu\home\arunasp\stuff\SampleProject"
-        ) == "/home/arunasp/stuff/SampleProject"
+            r"\\wsl.localhost\Ubuntu\home\devuser\stuff\SampleProject"
+        ) == "/home/devuser/stuff/SampleProject"
 
     def test_legacy_wsl_dollar_unc_path(self):
         assert srv._translate_windows_path(
-            r"\\wsl$\Ubuntu\home\arunasp\stuff\cicd_runner"
-        ) == "/home/arunasp/stuff/cicd_runner"
+            r"\\wsl$\Ubuntu\home\devuser\stuff\cicd_runner"
+        ) == "/home/devuser/stuff/cicd_runner"
 
     def test_windows_drive_path(self):
         assert srv._translate_windows_path(
@@ -495,13 +495,13 @@ class TestTranslateWindowsPath:
 
     def test_windows_drive_path_lowercase_drive_preserved(self):
         assert srv._translate_windows_path(
-            r"e:\Arunas\Docs"
-        ) == "/mnt/e/Arunas/Docs"
+            r"e:\Data\Docs"
+        ) == "/mnt/e/Data/Docs"
 
     def test_already_linux_path_unchanged(self):
         assert srv._translate_windows_path(
-            "/home/arunasp/stuff/already-linux"
-        ) == "/home/arunasp/stuff/already-linux"
+            "/home/devuser/stuff/already-linux"
+        ) == "/home/devuser/stuff/already-linux"
 
     def test_unrecognized_form_passed_through(self):
         assert srv._translate_windows_path("relative/path") == "relative/path"
@@ -516,9 +516,9 @@ class TestParseAllowedDirectoriesHeader:
         assert result == ["/mnt/d/Users/T-1000/dev"]
 
     def test_multiple_comma_separated_entries(self):
-        header = r"\\wsl.localhost\Ubuntu\home\arunasp\stuff\SampleProject,D:\Users\T-1000\dev"
+        header = r"\\wsl.localhost\Ubuntu\home\devuser\stuff\SampleProject,D:\Users\T-1000\dev"
         result = srv._parse_allowed_directories_header(header)
-        assert result == ["/home/arunasp/stuff/SampleProject", "/mnt/d/Users/T-1000/dev"]
+        assert result == ["/home/devuser/stuff/SampleProject", "/mnt/d/Users/T-1000/dev"]
 
     def test_whitespace_around_entries_stripped(self):
         header = r"D:\Users\a , D:\Users\b"

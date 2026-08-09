@@ -66,11 +66,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Named-project mounts -- kept for run_command()'s own
       # docker-compose-build use case (needs coordinator-visible build
-      # context, not just a host path handed to the daemon). Add your
-      # own here following the same pattern -- see "Adding a new named
-      # project" in README.md and examples/project-skeleton/.
-      - ${OPENCODE_MODEL_EVAL_DIR}:/projects/opencode-model-eval
-      - ${OPENCODE_CTX_SQUID_DIR}:/projects/opencode-plugin-ctx-squid
+      # context, not just a host path handed to the daemon). None by
+      # default -- add your own here following the same pattern, e.g.
+      # `- ${MY_PROJECT_DIR}:/projects/my-project`, matching a line in
+      # .env/.env.example -- see "Adding a new named project" in
+      # README.md and examples/project-skeleton/.
       # Read-only, existence-check ONLY -- run_in_directory() never
       # reads/writes through this path. Real work happens in an
       # ephemeral worker mounted against DYNAMIC_ROOT_HOST above,
