@@ -86,7 +86,7 @@ COMPOSE = @COMPOSE_CMD@
 # for THIS specific failure (though still generally sound practice
 # after any Makefile.am/configure.ac edit).
 
-.PHONY: help build build-extension build-all start stop restart logs status health-check push
+.PHONY: help build build-extension build-all start stop restart logs status health-check push skills-check
 
 help:
 	@echo "Autotools-standard targets: check install uninstall dist clean"
@@ -207,7 +207,7 @@ health-check:
 # of missing-but-not-required tools; `./configure` does not check
 # for shellcheck since `check` is the only thing that needs it and
 # it degrades gracefully.
-check-local:
+check-local: skills-check
 	$(PYTHON3) -m pytest server/test_bash_mcp_server.py -v --asyncio-mode=auto
 	@if command -v shellcheck >/dev/null 2>&1; then \
 		echo "Running shellcheck..." ; \
@@ -215,6 +215,28 @@ check-local:
 	else \
 		echo "shellcheck not found on PATH -- skipping (not required)" ; \
 	fi
+
+# Skills are published in two formats from one source of truth: the
+# browsable skills/opencode/<name>/ trees, and the packaged
+# skills/claude/<name>.skill bundles. Keeping those in sync by
+# discipline does not survive a busy week, so this makes drift a build
+# failure -- validate.py unpacks each bundle in memory and compares it
+# byte-for-byte against the tree it was built from, as well as checking
+# frontmatter and that every shipped reference is actually pointed at.
+# Wired into check-local rather than given its own CI job, so the same
+# command runs locally, in a worker, and in CI. Stdlib only, so it runs
+# anywhere python3 does.
+# validate.py is stdlib-only by design, so this target deliberately does
+# NOT use $(PYTHON3). ./configure resolves that to the interpreter it
+# found on the host -- here a .venv whose python3 is a symlink into a
+# conda install -- which does not exist inside a worker container, so the
+# symlink dangles and the target dies with exit 127. Plain python3 from
+# PATH works on the host and in any worker, which is the whole point of
+# keeping validate.py dependency-free.
+SKILLS_PYTHON ?= python3
+
+skills-check: ## Validate skills/ and prove both formats agree
+	$(SKILLS_PYTHON) $(srcdir)/skills/validate.py
 
 # `make install` -- dist_pkgdata_SCRIPTS/DATA above already install
 # the flat top-level files via automake's own generated rules; this
@@ -245,7 +267,7 @@ install-data-local: clean-example-artifacts
 	$(MKDIR_P) "$(DESTDIR)$(pkgdatadir)"
 	(cd $(srcdir) && tar --exclude=target --exclude=node_modules \
 		--exclude=__pycache__ --exclude=.pytest_cache --exclude=.venv \
-		-cf - server worker examples desktop-extension) | \
+		-cf - server worker examples desktop-extension skills) | \
 		(cd "$(DESTDIR)$(pkgdatadir)" && tar -xf -)
 	@echo ""
 	@echo "Installed to $(DESTDIR)$(pkgdatadir)"
@@ -296,7 +318,8 @@ clean-local: clean-example-artifacts
 # exclusions: no node_modules, no packed .mcpb, no __pycache__).
 EXTRA_DIST = \
 	.gitignore \
-	server worker examples \
+	server worker examples skills \
+	AGENTS.md CLAUDE.md \
 	desktop-extension/index.js desktop-extension/manifest.json \
 	desktop-extension/package.json desktop-extension/package-lock.json \
 	desktop-extension/build.sh

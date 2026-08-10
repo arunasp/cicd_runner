@@ -30,6 +30,7 @@ disposable ephemeral containers.
 - [Shared Makefile fragment](#shared-makefile-fragment)
 - [Design decisions](#design-decisions)
 - [Status](#status)
+- [Skills](#skills)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -785,6 +786,34 @@ restart.
 
 - No auto-generated starter `opencode.json` for new projects adopting
   [Directory ACLs](#directory-acls).
+
+## Skills
+
+The `skills/` directory ships reusable instruction sets describing how to
+work with this runner correctly. They exist because generic CI/CD knowledge
+does not transfer cleanly to the mount model and privilege split here, so an
+agent reasoning from ordinary CI assumptions reaches confidently wrong
+conclusions.
+
+Two are published: `docker-cicd-runner`, covering how to drive pipelines
+through this runner and how to design one from scratch, and
+`docker-run-as-host-user`, covering the uid:gid mechanics.
+
+Each is published in two formats from a single source:
+
+| Path | Form |
+|---|---|
+| `skills/opencode/<name>/` | Unpacked tree, readable directly in the repository |
+| `skills/claude/<name>.skill` | Packaged bundle, installable into a Claude account |
+
+`make skills-check` validates frontmatter, confirms every shipped reference
+file is actually pointed at, and unpacks each bundle in memory to prove it is
+byte-identical to the tree it was built from. Drift fails the build rather
+than being caught by eye. It runs as part of `make check`, so the same
+command covers local runs, workers and CI.
+
+`AGENTS.md` and `CLAUDE.md` at the repository root point agents at these, so
+the skills are discoverable by whichever convention a given tool follows.
 
 ## Contributing
 
