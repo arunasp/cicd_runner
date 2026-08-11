@@ -666,6 +666,69 @@ async def _is_path_allowed(requested_path: str, ctx: Context) -> tuple[bool, str
     )
 
 
+COMPOSE_FILENAMES = ("docker-compose.yml", "docker-compose.yaml",
+                     "compose.yml", "compose.yaml")
+
+# Fixed invocations, one per action. Nothing from the caller reaches
+# these -- the caller picks a name, the coordinator supplies the
+# argv. That is the whole security property: a compose file can mount
+# anything, so the boundary has to be WHICH directory is reachable
+# (the ACL), never what the caller can append to the command.
+#
+# `rebuild` is build -> rm -sf -> up, not `up --build`, because
+# recreating a container in place after a BuildKit rebuild hits
+# compose v1's `KeyError: ContainerConfig` (docker/compose#11742).
+# That is a compose-version workaround, not knowledge of any project.
+CONTAINER_ACTIONS = {
+    "up": (["up", "-d"],),
+    "down": (["down"],),
+    "restart": (["restart"],),
+    "rebuild": (["build"], ["rm", "-sf"], ["up", "-d"]),
+    "status": (["ps"],),
+    "logs": (["logs", "--tail", "200"],),
+}
+
+
+def _resolve_compose_binary() -> tuple[list[str] | None, str | None]:
+    """Prefer the v2 plugin, fall back to standalone v1.
+
+    Probes rather than assumes: `docker compose version` exits non-zero
+    when the plugin is absent even though `docker` itself exists, which
+    is precisely the case that made an earlier start.sh fail on a host
+    carrying only v1.
+    """
+    try:
+        probe = subprocess.run(["docker", "compose", "version"],
+                               capture_output=True, text=True, timeout=30)
+        if probe.returncode == 0:
+            return ["docker", "compose"], None
+    except FileNotFoundError:
+        return None, ("ERROR: 'docker' not found in the coordinator image "
+                      "-- this should never happen")
+    except subprocess.TimeoutExpired:
+        return None, "TIMEOUT: probing for the compose plugin"
+
+    try:
+        probe = subprocess.run(["docker-compose", "version"],
+                               capture_output=True, text=True, timeout=30)
+        if probe.returncode == 0:
+            return ["docker-compose"], None
+    except FileNotFoundError:
+        pass
+    except subprocess.TimeoutExpired:
+        return None, "TIMEOUT: probing for standalone docker-compose"
+
+    return None, ("REFUSED: neither 'docker compose' nor 'docker-compose' "
+                  "is available in the coordinator image")
+
+
+def _find_compose_file(directory: Path) -> str | None:
+    for name in COMPOSE_FILENAMES:
+        if (directory / name).is_file():
+            return name
+    return None
+
+
 @mcp.tool()
 def list_projects() -> str:
     """List the projects currently mounted and available to
@@ -755,6 +818,83 @@ async def run_in_directory(relative_path: str, binary: str, args: list[str], ctx
         return "ERROR: 'docker' not found in the coordinator image -- this should never happen"
 
     return ExecutionResult(result.returncode, result.stdout, result.stderr).as_text()
+
+
+@mcp.tool()
+async def container_control(relative_path: str, action: str,
+                            ctx: Context) -> str:
+    """Control the docker-compose stack defined in one allowed directory.
+
+    `relative_path` is relative to the dynamic root and must be the
+    directory CONTAINING the compose file (e.g. "some-repo/tools/server",
+    not "some-repo"). It is resolved and ACL-checked exactly as
+    run_in_directory does -- the same three allow-paths apply.
+
+    `action` is one of: up, down, restart, rebuild, status, logs. The
+    coordinator constructs the whole command; nothing from the caller is
+    appended to it.
+
+    Unlike run_in_directory this runs in THIS coordinator, which holds the
+    docker socket -- an ephemeral worker has none and so cannot drive
+    compose at all. It deliberately knows nothing about any particular
+    project: the compose file is the project's, its environment comes from
+    the project's own .env beside it, and this tool neither inspects nor
+    validates either. The directory ACL is therefore the entire trust
+    boundary for this capability, exactly as the binary allowlists are for
+    the two run_* tools.
+    """
+    if not DYNAMIC_ROOT_HOST:
+        return "REFUSED: DYNAMIC_ROOT_HOST is not configured (see docker-compose.yml)"
+    if action not in CONTAINER_ACTIONS:
+        return (f"REFUSED: '{action}' is not a known action "
+                f"{sorted(CONTAINER_ACTIONS)}")
+
+    validated = _resolve_dynamic_dir(relative_path)
+    if validated is None:
+        return f"REFUSED: '{relative_path}' is not a valid subdirectory under the dynamic root"
+
+    offset = validated.relative_to(DYNAMIC_ROOT.resolve())
+    host_path = f"{DYNAMIC_ROOT_HOST.rstrip('/')}/{offset}"
+
+    allowed, reason = await _is_path_allowed(host_path, ctx)
+    if not allowed:
+        return f"REFUSED: '{relative_path}' -- {reason}"
+
+    compose_file = _find_compose_file(validated)
+    if compose_file is None:
+        return (f"REFUSED: no compose file in '{relative_path}' "
+                f"(looked for {', '.join(COMPOSE_FILENAMES)})")
+
+    compose_cmd, compose_error = _resolve_compose_binary()
+    if compose_error:
+        return compose_error
+
+    # Run with cwd set to the compose directory so compose reads that
+    # directory's own .env, and pass the file explicitly so the result
+    # does not depend on compose's own directory search.
+    steps = CONTAINER_ACTIONS[action]
+    outputs = []
+    for step in steps:
+        try:
+            result = subprocess.run(
+                [*compose_cmd, "-f", compose_file, *step],
+                cwd=str(validated),
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return f"TIMEOUT: '{' '.join(step)}' exceeded {TIMEOUT_SECONDS}s"
+        outputs.append(f"$ {' '.join([*compose_cmd, *step])}\n"
+                       + ExecutionResult(result.returncode, result.stdout,
+                                         result.stderr).as_text())
+        # Stop at the first failing step rather than pressing on: a failed
+        # build followed by a successful `up` would report success while
+        # running the OLD image, which is the confident-wrong-answer case.
+        if result.returncode != 0:
+            return "\n\n".join(outputs)
+
+    return "\n\n".join(outputs)
 
 
 if __name__ == "__main__":

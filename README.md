@@ -19,6 +19,7 @@ disposable ephemeral containers.
 - [Architecture](#architecture)
 - [The Makefile as CI/CD manifest](#the-makefile-as-cicd-manifest)
 - [Usage](#usage)
+- [Controlling a project's containers](#controlling-a-projects-containers)
 - [Configuration](#configuration)
 - [Per-project worker images](#per-project-worker-images)
 - [Dependency caching](#dependency-caching)
@@ -413,6 +414,48 @@ absolute host path.
 `hello-typescript/` are complete, working pipelines across four
 toolchains — useful both as a smoke test and as a template for a new
 project's own Makefile.
+
+## Controlling a project's containers
+
+`container_control(relative_path, action)` brings a project's own
+`docker-compose` stack up, down or back with a rebuild. `relative_path` is
+the directory **containing** the compose file — `some-repo/tools/server`,
+not `some-repo` — resolved and ACL-checked exactly as `run_in_directory()`
+is, so the same three allow-paths apply.
+
+| Action | What it runs |
+|---|---|
+| `up` | `up -d` |
+| `down` | `down` |
+| `restart` | `restart` |
+| `rebuild` | `build`, then `rm -sf`, then `up -d` |
+| `status` | `ps` |
+| `logs` | `logs --tail 200` |
+
+The coordinator constructs each command in full. Nothing from the caller is
+appended to it, and a failing step stops the sequence rather than
+continuing — a failed `build` followed by a successful `up` would otherwise
+report success while running the previous image.
+
+`rebuild` is deliberately not `up --build`: recreating a container in place
+after a BuildKit rebuild hits compose v1's `KeyError: ContainerConfig`
+([docker/compose#11742](https://github.com/docker/compose/issues/11742)).
+The v2 plugin is preferred and standalone v1 is the fallback, detected by
+probing rather than assumed.
+
+This is the one tool that runs in the **coordinator** rather than a worker,
+because a worker has no docker socket and so cannot drive compose at all.
+Two consequences follow, and both are deliberate:
+
+- **It knows nothing about any project.** The compose file belongs to the
+  project, its environment comes from that directory's own `.env`, and this
+  tool neither inspects nor validates either. A coordinator that understood
+  individual projects would stop being reusable across them.
+- **The directory ACL is the entire trust boundary.** Neither binary
+  allowlist applies here — there is no caller-supplied binary to gate. A
+  compose file can mount anything, so what constrains this capability is
+  *which directories are reachable*, which is decided coordinator-side and
+  never from inside a project tree. Keep it that way.
 
 ## Configuration
 

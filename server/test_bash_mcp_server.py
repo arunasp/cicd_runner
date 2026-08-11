@@ -597,3 +597,96 @@ class TestParseAllowedDirectoriesHeader:
         header = r"D:\Users\a,,D:\Users\b"
         result = srv._parse_allowed_directories_header(header)
         assert result == ["/mnt/d/Users/a", "/mnt/d/Users/b"]
+
+
+class TestResolveComposeBinary:
+    """The v2-plugin-vs-v1-standalone branch, verified by faking the tools
+    rather than needing every variant installed.
+
+    All three states matter, including the one where neither exists: a
+    silent wrong default there is worse than a loud failure, and it is
+    exactly where this class of bug hides.
+    """
+
+    @staticmethod
+    def _mock_bin(directory, name, body):
+        path = directory / name
+        path.write_text("#!/bin/sh\n" + body + "\n")
+        path.chmod(0o755)
+        return path
+
+    def test_prefers_the_v2_plugin_when_present(self, monkeypatch, tmp_path):
+        self._mock_bin(tmp_path, "docker", 'exit 0')
+        self._mock_bin(tmp_path, "docker-compose", 'exit 0')
+        monkeypatch.setenv("PATH", str(tmp_path))
+        cmd, err = srv._resolve_compose_binary()
+        assert err is None
+        assert cmd == ["docker", "compose"]
+
+    def test_falls_back_to_v1_when_the_plugin_is_absent(self, monkeypatch,
+                                                       tmp_path):
+        # Real behaviour of a docker without the compose plugin: docker
+        # itself exists and succeeds for other subcommands, but
+        # `docker compose version` exits non-zero.
+        self._mock_bin(tmp_path, "docker", '''
+if [ "$1" = "compose" ]; then
+  echo "docker: 'compose' is not a docker command." >&2
+  exit 1
+fi
+exit 0''')
+        self._mock_bin(tmp_path, "docker-compose",
+                       'echo "docker-compose version 1.29.2"')
+        monkeypatch.setenv("PATH", str(tmp_path))
+        cmd, err = srv._resolve_compose_binary()
+        assert err is None
+        assert cmd == ["docker-compose"]
+
+    def test_refuses_loudly_when_neither_is_available(self, monkeypatch,
+                                                     tmp_path):
+        self._mock_bin(tmp_path, "docker", '''
+if [ "$1" = "compose" ]; then exit 1; fi
+exit 0''')
+        monkeypatch.setenv("PATH", str(tmp_path))
+        cmd, err = srv._resolve_compose_binary()
+        assert cmd is None
+        assert "neither" in err
+
+    def test_reports_a_missing_docker_distinctly(self, monkeypatch, tmp_path):
+        """A missing docker is a different fault from a missing plugin and
+        must not be reported as 'no compose available'."""
+        monkeypatch.setenv("PATH", str(tmp_path))
+        cmd, err = srv._resolve_compose_binary()
+        assert cmd is None
+        assert "'docker' not found" in err
+
+
+class TestFindComposeFile:
+    def test_finds_each_accepted_name(self, tmp_path):
+        for name in srv.COMPOSE_FILENAMES:
+            d = tmp_path / name.replace(".", "_")
+            d.mkdir()
+            (d / name).write_text("services: {}\n")
+            assert srv._find_compose_file(d) == name
+
+    def test_returns_none_when_absent(self, tmp_path):
+        assert srv._find_compose_file(tmp_path) is None
+
+    def test_ignores_a_directory_of_that_name(self, tmp_path):
+        (tmp_path / "docker-compose.yml").mkdir()
+        assert srv._find_compose_file(tmp_path) is None
+
+
+class TestContainerActions:
+    def test_rebuild_does_not_use_up_build(self):
+        """`up --build` recreates in place, which hits compose v1's
+        KeyError: ContainerConfig after a BuildKit rebuild. The sequence
+        must remove the container between build and up."""
+        steps = srv.CONTAINER_ACTIONS["rebuild"]
+        assert [s[0] for s in steps] == ["build", "rm", "up"]
+        assert not any("--build" in s for s in steps)
+
+    def test_every_action_is_a_fixed_sequence(self):
+        for name, steps in srv.CONTAINER_ACTIONS.items():
+            assert isinstance(steps, tuple), name
+            for step in steps:
+                assert all(isinstance(a, str) for a in step), name
