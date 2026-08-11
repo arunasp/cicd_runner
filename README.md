@@ -31,6 +31,7 @@ disposable ephemeral containers.
 - [Shared Makefile fragment](#shared-makefile-fragment)
 - [Design decisions](#design-decisions)
 - [Status](#status)
+- [Changelog](CHANGELOG.md)
 - [Skills](#skills)
 - [Contributing](#contributing)
 - [License](#license)
@@ -41,7 +42,7 @@ A project's own container can't safely rebuild itself: the moment
 `docker compose up -d` recreates a running container, any in-flight
 request that triggered the rebuild is dropped along with it.
 
-`cicd-runner` avoids this by being a genuinely separate process from
+`cicd-runner` avoids this by being a separate process from
 everything it builds — one runner container acting on other project
 containers, never rebuilding itself.
 
@@ -99,7 +100,7 @@ curl http://localhost:1444/health
 {"status":"ok","docker_socket":true,"dynamic_root_configured":true,"cache_root_configured":true}
 ```
 
-A real `GET /health` endpoint, outside the MCP protocol entirely —
+A `GET /health` endpoint, outside the MCP protocol entirely —
 run through a plain `curl`/uptime monitor without needing a real MCP
 client. Returns HTTP `503` (not `200`) when `docker_socket` is false —
 the one dependency that matters most, since that access is this
@@ -132,7 +133,7 @@ project](#adding-a-new-named-project)) checks the same underlying
 conditions directly — docker socket existence, env vars — without an
 HTTP round-trip. Don't `curl localhost:1444/health` from inside a
 `run_command()`/`run_in_directory()` call to check this instead: that
-is a real, confirmed self-deadlock, not just a bad idea — FastMCP
+is a self-deadlock, confirmed by running it — FastMCP
 dispatches a synchronous `@mcp.tool()` function like `run_command()`
 directly on the coordinator's single asyncio event loop, so its own
 `subprocess.run()` blocks that same loop for its whole duration,
@@ -228,7 +229,7 @@ working in, not every opencode session on the machine.
 
 opencode connects to the coordinator directly over HTTP — no bridge
 process, unlike the Desktop extension. It's also the one client this
-repo confirms genuinely supports the MCP roots protocol (see rule #1
+repo confirms supports the MCP roots protocol (see rule #1
 in [Directory ACLs](#directory-acls)): its own project directory is
 usually already reachable with no extra config, on top of whatever
 `external_directory` rules a project's `opencode.json` declares.
@@ -258,7 +259,7 @@ Two containers:
 ```
 
 **`cicd-runner` (coordinator)** — the only container with access to
-`/var/run/docker.sock`. Exposes two MCP tools, plus a plain HTTP
+`/var/run/docker.sock`. Exposes four MCP tools, plus a plain HTTP
 `GET /health` endpoint outside the MCP protocol (see [Quick
 start](#quick-start)):
 
@@ -297,7 +298,7 @@ locally are the same file, not two representations kept in sync by
 hand.
 
 This isn't a new idea; it's a well-established pattern this project
-deliberately follows rather than inventing something bespoke:
+follows rather than inventing something bespoke:
 
 - **GNU Coding Standards** define `all`, `check`, `install`, and
   `clean` as the standard target names any GNU-compliant `Makefile`
@@ -346,10 +347,10 @@ tooling yet) from nothing to a working pipeline:
    build:
    	python3 -m py_compile hello.py
    ```
-   Leave `deploy`/`verify` as-is (`exit 1`) until there's a real
+   Leave `deploy`/`verify` as-is (`exit 1`) until there is a
    deploy target — `lint`/`test`/`build` alone are already a working
    pipeline; see `examples/hello-python/Makefile` for a complete
-   reference including a real `deps` step (see [Dependency
+   reference including a `deps` step (see [Dependency
    caching](#dependency-caching)).
 3. If the project needs a dependency install step, add one and make
    `test`/`lint` depend on it (matching `examples/hello-python/`'s own
@@ -437,7 +438,7 @@ appended to it, and a failing step stops the sequence rather than
 continuing — a failed `build` followed by a successful `up` would otherwise
 report success while running the previous image.
 
-`rebuild` is deliberately not `up --build`: recreating a container in place
+`rebuild` is not `up --build`: recreating a container in place
 after a BuildKit rebuild hits compose v1's `KeyError: ContainerConfig`
 ([docker/compose#11742](https://github.com/docker/compose/issues/11742)).
 The v2 plugin is preferred and standalone v1 is the fallback, detected by
@@ -561,7 +562,7 @@ directly — a bare `--user <uid>:<gid>` on an image with no matching
 `/etc/passwd` entry for that uid causes the kernel's own `execve()` to
 fail with `EAGAIN` ("resource temporarily unavailable") for any
 binary. `worker/entrypoint.sh` starts as root, creates a matching
-passwd/group entry with a real `$HOME` if one doesn't already exist,
+passwd/group entry with a writable `$HOME` if one doesn't already exist,
 then drops privileges via `setpriv --reset-env` before exec'ing the
 requested binary.
 
@@ -624,7 +625,7 @@ than a bespoke format. A requested path must satisfy at least one of:
    entry translated from whatever form Claude Desktop's own directory
    picker produced — a genuine Windows path (`D:\Users\...`) or a
    WSL-interop UNC path (`\\wsl.localhost\Ubuntu\...`), both
-   confirmed to appear in a real Claude Desktop directory allowlist —
+   confirmed to appear in a Claude Desktop directory allowlist —
    into its native WSL2 equivalent before comparison.
 
 A path matching neither is refused, with the specific reason given.
@@ -701,7 +702,7 @@ run_in_directory(relative_path="cicd_runner", binary="bash", args=["autogen.sh"]
 run_in_directory(relative_path="cicd_runner", binary="bash", args=["-c", "./configure"])
 ```
 
-A real host shell is still the more direct path for day-to-day use;
+A host shell is still the more direct path for day-to-day use;
 this exists so the regeneration itself doesn't strictly require one.
 
 ## Build script
@@ -716,7 +717,7 @@ make all              # build-all + start
 make push             # git push origin main -- see below for where this can actually run
 ```
 
-`make push` is a real pipeline step, not just documentation for a
+`make push` is a pipeline step, not documentation for a
 command to remember — but it's the exact same `git push origin main`
 either way, and doesn't grant this project's own containers any
 credentials they didn't already have. The coordinator/worker
@@ -733,7 +734,7 @@ a bug in the target.
 
 `build.sh` builds the worker and coordinator images and needs only
 `docker` — `docker compose`/`docker-compose` is detected lazily, only
-when the coordinator stage actually needs it.
+when the coordinator stage needs it.
 
 `desktop-extension/build.sh` builds the Desktop `.mcpb` package
 separately, since it needs Node rather than the runner's own
@@ -792,17 +793,17 @@ images. At most one resolves in any given context. If neither does,
   A capability added for the worker (e.g. `bash`, for a project's own
   Autotools regeneration) does not carry over to the coordinator.
   Originally one shared list gated both tools; split 2026-08-09 once
-  a real worker-only need (`bash`) surfaced and would otherwise have
+  a worker-only need (`bash`) surfaced and would otherwise have
   had to be granted to the coordinator too, undermining the same
   least-privilege logic already applied to `docker` itself (the
   worker deliberately has none, see the point above).
 - **No SSH keys or git credentials are mounted here.** Projects that
   need `git push` keep that capability in their own container, scoped
   to that one repo. Applies to this project's own repo too —
-  `make push` (see [Build script](#build-script)) is a real target,
+  `make push` (see [Build script](#build-script)) is a target,
   not a workaround around this boundary: it's the same bare
   `git push origin main`, and only succeeds where a human's own
-  credentials for this remote are actually present.
+  credentials for this remote are present.
 
 ## Status
 
@@ -810,20 +811,28 @@ The core service (coordinator + ephemeral worker) is implemented,
 tested, and in use. Both the Desktop `.mcpb` connector and the
 opencode remote-MCP config work against real client sessions.
 
-Covered by real, committed tests (`server/test_bash_mcp_server.py`):
+Covered by committed tests (`server/test_bash_mcp_server.py`, 85 cases):
 path resolution and traversal/symlink-escape defense, per-call config
 resolution (`.cicd-image`, `CACHE_ROOT`, `HOST_UID`/`HOST_GID`), and
 [Directory ACLs](#directory-acls) (MCP roots + `opencode.json`
-`external_directory`).
+`external_directory`), and the compose-binary detection behind
+`container_control` — v2 plugin present, only v1 present, and neither,
+each checked against a faked tool rather than needing every variant
+installed.
 
 Restarting or rebuilding the coordinator while a client is connected
 leaves that session stale — the coordinator has no memory of the old
 session ID, so calls get a `404` instead of a response. The Desktop
-`.mcpb` connector detects this automatically and recovers without
-manual intervention: it re-establishes its connection, replays the
-MCP handshake, and retries any in-flight request. Clients that don't
-use this connector still need a manual reconnect after a coordinator
-restart.
+`.mcpb` connector recovers on its own: it re-establishes its
+connection, replays the MCP handshake, and retries the in-flight
+request. Clients that don't use this connector need a manual
+reconnect after a coordinator restart.
+
+That covers stale sessions, not a changed tool list. A client fixes
+its view of the available tools during its own handshake with the
+connector, and the connector's stdio side does not restart when it
+reconnects upstream — so a newly added tool, or a changed signature,
+needs the extension reloaded before the client sees it.
 
 **Open decisions:**
 
@@ -850,7 +859,7 @@ Each is published in two formats from a single source:
 | `skills/claude/<name>.skill` | Packaged bundle, installable into a Claude account |
 
 `make skills-check` validates frontmatter, confirms every shipped reference
-file is actually pointed at, and unpacks each bundle in memory to prove it is
+file is pointed at, and unpacks each bundle in memory to prove it is
 byte-identical to the tree it was built from. Drift fails the build rather
 than being caught by eye. It runs as part of `make check`, so the same
 command covers local runs, workers and CI.
