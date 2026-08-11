@@ -318,6 +318,7 @@ clean-local: clean-example-artifacts
 # exclusions: no node_modules, no packed .mcpb, no __pycache__).
 EXTRA_DIST = \
 	.gitignore \
+	pytest.ini \
 	server worker examples skills \
 	AGENTS.md CLAUDE.md \
 	desktop-extension/index.js desktop-extension/manifest.json \
