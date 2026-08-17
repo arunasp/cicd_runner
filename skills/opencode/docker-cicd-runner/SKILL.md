@@ -1,6 +1,6 @@
 ---
 name: docker-cicd-runner
-description: How the cicd_runner container pair actually works and how to drive real CI/CD workflows through it -- coordinator vs ephemeral worker, the two separate allowlists, run_command vs run_in_directory, the single-directory mount and what follows from it, the Makefile target convention, and dependency caching that survives an ephemeral container. ALWAYS use this skill before running ANY pipeline stage through cicd-runner, before adding or changing a Makefile in a project cicd_runner executes, and before debugging why a stage that works locally fails inside a worker. Also use whenever the user mentions cicd_runner, cicd-runner, "the runner", worker allowlists, wheelhouse or venv caching for CI, or asks why a binary, path, include or install is unavailable inside a worker. Generic DevOps CI/CD knowledge does NOT transfer directly -- the mount model and privilege split are unusual, and assuming a normal CI runner produces confidently wrong answers.
+description: How the cicd_runner container pair actually works and how to drive CI/CD through it -- coordinator vs ephemeral worker, the two allowlists, run_command vs run_in_directory, the single-directory mount, which container a stage belongs in (worker, .cicd-image, or the project's own), the Makefile target convention, and dependency caching. ALWAYS use this skill before running ANY pipeline stage through cicd-runner, before adding or changing a Makefile in a project cicd_runner executes, and before debugging why a stage that works locally fails inside a worker. Also use whenever the user mentions cicd_runner, cicd-runner, "the runner", worker allowlists or CI caching, asks why a binary or path is unavailable in a worker, or asks whether a container stage can run through the runner -- a device or capability never can, at any image. Generic DevOps CI/CD knowledge does NOT transfer directly -- the mount model and privilege split are unusual, and assuming a normal CI runner produces confidently wrong answers.
 ---
 
 # Driving CI/CD through cicd_runner
@@ -88,8 +88,10 @@ explicit design.
 
 Consequences that bite:
 
-- Any stage needing a Docker daemon **cannot run in a worker**. A `deploy`
-  target that starts containers is coordinator-side or human-side.
+- Any stage needing a Docker daemon **cannot run in a worker**. It is not
+  thereby human-only: the coordinator holds the socket, so see
+  [Running a project's container stages](#running-a-projects-container-stages)
+  before reporting such a stage as unrunnable.
 - Anything writing outside the project tree (`make install` to `/usr/local`)
   **fails** under the worker's uid. Keep `deploy` out of `all`, or point
   `PREFIX` somewhere writable.
@@ -152,6 +154,138 @@ Claude Desktop** -- do not rely on this), a project's `opencode.json`
 external-directory rules, or an `X-Allowed-Directories` header. In Claude
 Desktop that header is populated by the extension's **Additional Allowed
 Directories** setting, which is the practical route.
+
+## Running a project's container stages
+
+A worker has no Docker, so a stage that builds or runs a container fails
+there. That does not make it human-only. The coordinator holds the socket,
+and there are two routes into it. Which one applies depends on how the
+project starts its containers.
+
+**A compose stack: `container_control(relative_path, action)`.** The path is
+the directory *containing* the compose file, not the repo root, and it is
+ACL-checked exactly as `run_in_directory` is. Actions are `up`, `down`,
+`restart`, `rebuild`, `status`, `logs`. The coordinator builds each command
+in full and appends nothing from the caller, so neither binary allowlist
+applies: there is no caller-supplied binary to gate, and the directory ACL
+is the entire trust boundary. `rebuild` is `build`, `rm -sf`, `up -d` rather
+than `up --build`, which avoids compose v1's `KeyError: ContainerConfig` on
+recreate.
+
+**A Makefile that shells out to `docker`: `run_command(project=...)`.** This
+runs in the coordinator, so a target invoking `docker build` or `docker run`
+works there. `make` and `docker` are both on the coordinator's allowlist,
+and only the entry binary is checked, so the `docker` calls a Makefile makes
+as children run unchecked.
+
+Reachability is the thing to establish first, and it differs from the other
+tool. `run_command` accepts **named mounts only**, never an arbitrary path
+under `DYNAMIC_ROOT`. A project reachable by `run_in_directory` is not
+thereby reachable by `run_command`; asking for one that is not mounted
+returns `REFUSED: '<name>' is not a mounted project directory`. Making it
+reachable is a host-side change to the runner itself -- a var in `.env`, a
+matching `${VAR}:/projects/<name>` volume in `docker-compose.yml`, then
+`./start.sh`. That is someone's machine configuration, so ask rather than
+assume it.
+
+Verified against a live coordinator, August 2026: `make health-check`
+reports `docker_socket: true`; `docker ps` through `run_command` lists the
+host's real containers; `docker compose version` reports the v2 plugin.
+Standalone `docker-compose` v1 is **not** in the coordinator image, so a
+project target calling `docker-compose` fails there with `command not found`
+while the same target's `docker compose` form works.
+
+## When the project owns the container
+
+Three container roles get conflated, and only the third can hold a device.
+
+| Role | Defined by | Lifetime | Can hold a device or capability |
+|---|---|---|---|
+| Worker | the runner (`worker/Dockerfile`) | one call | No |
+| Worker under `.cicd-image` | an image the project names | one call | No |
+| The project's own container | the project (Dockerfile + compose) | as long as it is up | **Yes** |
+
+`.cicd-image` swaps the image and nothing else. The `docker run` argv is
+fixed in the coordinator, so no image choice adds `--device`, `--cap-add`,
+`--network` or an extra `-v`. A stage needing any of those is not a worker
+stage at any image, and no amount of building will make it one.
+
+So the rule is about what the stage needs, not about convenience. A device, a
+capability, a host path that must match the host exactly, or a service that
+outlives one call: that belongs in a container the **project** defines and
+owns. The runner then drives it through `container_control` rather than
+supplying it.
+
+A worked example from a real project alongside this one: its `tools/server/`
+holds a `Dockerfile`, `docker-compose.yml`, `entrypoint.sh` and `start.sh`.
+The image carries the project's own build dependencies, but its GPU runtime
+is **not installed** -- the host's `/opt/rocm` and `/usr/lib/wsl` are
+bind-mounted read-only, so the container's version matches the host's by
+construction and the image avoids a multi-gigabyte layer. The GPU device node
+is mounted there, and its compose file states plainly that this is the only
+container in that project with device access, because the runner's workers
+deliberately have none: GPU work belongs in the project container and CI work
+belongs in the runner.
+
+Three things that bite when writing such a container:
+
+- **The uid variable names differ between the two worlds.** The runner's
+  worker entrypoint reads `WORKER_UID`/`WORKER_GID`. A project container
+  following the `docker-run-as-host-user` skill reads `TARGET_UID`/
+  `TARGET_GID`. Neither is wrong; an image meant to serve both must read
+  both, and one that reads the wrong pair silently falls through to root and
+  writes root-owned files onto the host tree with no error.
+- **`setpriv --reset-env` clears the whole environment**, and the list to
+  re-inject afterwards is per-container, not universal. The runner's worker
+  re-injects the three dependency-cache variables; the project container
+  above re-injects `PATH` and `LD_LIBRARY_PATH`, without which its mounted
+  toolchain was present but unreachable.
+- **Do not drive a project's compose file directly.** Go through the
+  project's own start script where it has one: it resolves the variables the
+  compose file expects and does `rm -sf` before `up -d`, which is what avoids
+  compose v1's recreate bug.
+
+One limit worth stating before designing around it. `container_control`'s
+verbs are lifecycle -- `up`, `down`, `restart`, `rebuild`, `status`, `logs`.
+None of them returns a test verdict. A long-lived service fits that shape; a
+one-shot stage that must report pass or fail does not, and parsing `logs` for
+a success line is weaker than the exit code the stage already produces. Such
+a stage is invoked through `run_command` on a named mount instead, where the
+project's own `docker run` keeps its flags and the exit status comes back.
+
+## Building an image a worker can use
+
+An upstream language image is enough when the only thing missing is a
+toolchain. It is not enough when the run writes to the bind mount. The uid
+drop lives in the runner's own `worker/entrypoint.sh`, `WORKER_UID` and
+`WORKER_GID` arrive as plain environment variables, and an image with no
+entrypoint reading them ignores them, runs as root, and leaves everything it
+writes root-owned on the host. Nothing errors.
+
+So a usable image carries four things the default one already has: an
+`ENTRYPOINT` reading that uid pair and dropping privilege with `setpriv`;
+`util-linux` plus the base's own user-creation tools (`addgroup`/`adduser`
+on Debian, `groupadd`/`useradd` from `shadow-utils` on Red Hat); re-injection
+of `NPM_CONFIG_CACHE`, `CARGO_HOME` and `PIP_CACHE_DIR` after
+`--reset-env` clears them; and `/etc/cicd-common.mk` if the Makefile
+includes it.
+
+Build it locally rather than naming a registry image. The coordinator holds
+the socket and mounts the dynamic root read-only, so it builds from any
+directory under it and the image never leaves the host:
+
+```
+run_command(project="<a mounted project>", binary="docker",
+            args=["build", "-t", "my-worker", "/dynamic-root/<path>"])
+run_in_directory(relative_path="<path>", binary="make", args=["<target>"])
+```
+
+Prove it rather than assume it, and the control matters as much as the run:
+call the same repository from a directory **without** a `.cicd-image` and
+confirm it reports the default image. Confirmed that way, August 2026 -- a
+Rocky 9 image against Debian 13 for the same repository, `id` returning the
+host uid with a real passwd entry, and a file written to the bind mount owned
+by that user.
 
 ## Where a dependency belongs
 

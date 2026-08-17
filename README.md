@@ -477,9 +477,9 @@ The default `cicd-worker` image is intentionally minimal
 (git/make/shellcheck — see `worker/Dockerfile`), rather than trying to
 pre-install every toolchain a project might need.
 
-Drop a `.cicd-image` file (one line, an image reference) in a
-project's root to run its `run_in_directory()` calls in a different
-image:
+Drop a `.cicd-image` file (one line, an image reference) in the
+directory a call names to run its `run_in_directory()` calls in a
+different image:
 
 ```
 # .cicd-image
@@ -513,6 +513,57 @@ runs anything beyond what's already in a locally cached image, a
 `.cicd-image` reference can cause `docker run` to pull an image from a
 registry as a side effect of a tool call. Only use this with projects
 and `.cicd-image` files you already trust.
+
+### Building your own worker image
+
+An upstream language image is enough when the only thing missing is a
+toolchain. It is not enough when the run writes to the bind mount,
+because the uid drop lives in `worker/entrypoint.sh`, baked into
+`cicd-worker` itself. `WORKER_UID`/`WORKER_GID` are passed as plain
+environment variables, so an image with no entrypoint reading them
+ignores them, runs as its own default user — root, for most bases — and
+leaves everything it writes root-owned on the host.
+
+An image meant to be a worker therefore carries four things the default
+one already has:
+
+1. An `ENTRYPOINT` that reads `WORKER_UID`/`WORKER_GID`, creates a
+   matching passwd entry, and drops privilege with `setpriv`. See
+   `worker/entrypoint.sh`, and the `docker-run-as-host-user` skill for
+   why a bare `docker run --user` fails instead.
+2. `setpriv` (from `util-linux`) and the base's own user-creation
+   tools — `addgroup`/`adduser` on Debian, `groupadd`/`useradd` from
+   `shadow-utils` on a Red Hat base.
+3. Re-injection of the dependency-cache variables after the drop.
+   `setpriv --reset-env` clears the whole environment, so capture
+   `NPM_CONFIG_CACHE`, `CARGO_HOME` and `PIP_CACHE_DIR` while still
+   root and pass them through `env` inside the same `setpriv` call, or
+   the cache mounts stay mounted with nothing looking at them.
+4. `/etc/cicd-common.mk`, if the project's Makefile includes it.
+
+Build it locally rather than pulling it. The coordinator holds the
+docker socket and mounts the dynamic root read-only, so it can build
+from any directory under it — the image never leaves the host, which
+sidesteps the registry trade-off above:
+
+```
+run_command(project="<a mounted project>", binary="docker",
+            args=["build", "-t", "my-worker", "/dynamic-root/<path>"])
+```
+
+Confirmed end to end, August 2026, with a Rocky 9 image built this way:
+the worker reported `Rocky Linux 9.3` where the same repository without
+a `.cicd-image` reported the default Debian, `id` inside it returned the
+invoking host uid with a real passwd entry, and a file it wrote to the
+bind mount came out owned by that user rather than by root.
+
+One consequence of the single-directory mount is worth planning around
+before writing such an image: `.cicd-image` is read from the directory
+the call names, and a worker mounts only that directory. A per-stage
+image in a subdirectory gets a container that cannot see the rest of the
+repository, so a stage needing the whole tree either takes the image at
+the repository root — which then applies to every call against it — or is
+restructured to need only its own directory.
 
 ## Dependency caching
 
