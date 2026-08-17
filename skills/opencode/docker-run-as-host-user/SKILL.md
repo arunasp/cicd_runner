@@ -159,3 +159,51 @@ the entrypoint pattern above (cause 1) should also always pass
 `--ulimit nproc=<generous value>:<same>` at `docker run` time (cause 2) —
 neither one alone is guaranteed sufficient if both conditions are present
 in the environment.
+
+## Three things the template above leaves to you
+
+**The variable names are a convention, not a standard.** `TARGET_UID`/
+`TARGET_GID` above are what a container you write yourself would read. A
+caller with its own convention sends its own names — a CI runner's worker
+entrypoint might read `WORKER_UID`/`WORKER_GID`, for instance. An image
+intended to serve both reads both, in two lines:
+
+```sh
+uid="${WORKER_UID:-${TARGET_UID:-}}"
+gid="${WORKER_GID:-${TARGET_GID:-}}"
+```
+
+Getting this wrong is silent. The entrypoint takes its fall-through branch,
+the container runs as root, and the only symptom is file ownership on the
+bind mount afterwards.
+
+**The user-creation commands are Debian's.** `addgroup`/`adduser` come from
+Debian's `adduser` package. On a Red Hat base they are `groupadd`/`useradd`
+from `shadow-utils`:
+
+```sh
+getent group "$gid" >/dev/null 2>&1 || groupadd --gid "$gid" worker
+useradd --uid "$uid" --gid "$gid" --home-dir /home/worker \
+    --shell /bin/sh --no-create-home worker >/dev/null 2>&1
+mkdir -p /home/worker
+```
+
+`setpriv` is still `util-linux` and `getent` still glibc, so only the two
+user-creation calls change.
+
+**`--reset-env` clears everything, and what to restore is per-container.**
+It is all-or-nothing, with no partial-reset option. Whatever the container
+genuinely needs has to be captured while still root and re-injected through
+`env` inside the same `setpriv` invocation:
+
+```sh
+exec setpriv --reuid="$uid" --regid="$gid" --clear-groups --reset-env \
+    env PATH="$saved_path" LD_LIBRARY_PATH="$saved_ld" "$@"
+```
+
+The list is not universal. A GPU container loses `PATH`'s toolchain prefix
+and `LD_LIBRARY_PATH`, so a mounted compiler becomes present but unreachable.
+A CI worker loses its dependency-cache variables, so the cache mounts stay
+mounted with nothing looking at them. Both failures are invisible: the drop
+succeeds, the command runs, and only the result is wrong. Work out what this
+specific container reads from its environment before writing the line.
