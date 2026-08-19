@@ -12,6 +12,7 @@ Run directly: python3 -m pytest server/test_bash_mcp_server.py -v --asyncio-mode
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -269,6 +270,33 @@ class TestUlimitFlags:
         monkeypatch.setattr(srv, "HOST_UID", "")
         monkeypatch.setattr(srv, "HOST_GID", "")
         assert srv._ulimit_flags() == ["--ulimit", "nproc=8192:8192"]
+
+
+class TestWorkerNameFlags:
+    def test_returns_name_flag_derived_from_relative_path(self):
+        result = srv._worker_name_flags("myproject")
+        assert result[0] == "--name"
+        assert result[1].startswith("cicd-worker-myproject-")
+
+    def test_sanitizes_slashes_in_relative_path(self):
+        result = srv._worker_name_flags("opencode/opencode-model-eval")
+        name = result[1]
+        assert "/" not in name
+        assert name.startswith("cicd-worker-opencode-opencode-model-eval-")
+
+    def test_two_calls_for_same_path_do_not_collide(self):
+        # Concurrent workers against the same project must get
+        # distinct names, or the second docker run would fail outright
+        # on a name already in use.
+        first = srv._worker_name_flags("myproject")[1]
+        second = srv._worker_name_flags("myproject")[1]
+        assert first != second
+
+    def test_name_is_docker_valid(self):
+        # Docker container names must match [a-zA-Z0-9][a-zA-Z0-9_.-]+
+        result = srv._worker_name_flags("a/b_c.d--e")
+        name = result[1]
+        assert re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]+", name), name
 
 
 class TestResolveDynamicDir:

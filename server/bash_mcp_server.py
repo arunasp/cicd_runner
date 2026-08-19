@@ -159,6 +159,7 @@ import json
 import os
 import re
 import subprocess
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
@@ -311,6 +312,34 @@ def _resolve_worker_image(project_dir: Path) -> tuple[str | None, str | None]:
     if not first_line:
         return None, f"REFUSED: '{IMAGE_CONFIG_FILENAME}' exists but is empty"
     return first_line, None
+
+
+_WORKER_NAME_SAFE = re.compile(r"[^a-zA-Z0-9_.-]")
+
+
+def _worker_name_flags(relative_path: str) -> list[str]:
+    """Direct request: worker containers previously got Docker's own
+    random adjective_surname name (docker run with no --name at all),
+    giving zero relation to what actually launched them -- confirmed
+    live via `docker ps` showing names like practical_satoshi with no
+    connection to the calling project. A name derived from the actual
+    relative_path is far more useful for anyone reading `docker ps`
+    mid-run or debugging a stuck worker.
+
+    Docker container names must match [a-zA-Z0-9][a-zA-Z0-9_.-]+ --
+    relative_path can contain '/' (e.g. "opencode/opencode-model-eval"),
+    which is not valid, so every disallowed character is replaced with
+    '-'. A short random suffix (not a timestamp) is appended for
+    uniqueness: --rm means a finished container's name frees up
+    immediately, but two concurrent workers against the SAME
+    relative_path (a real case -- nothing stops two calls racing) would
+    otherwise collide on an identical name and one docker run would
+    fail outright rather than the two independently succeeding the
+    same way two random-named containers already do today.
+    """
+    sanitized = _WORKER_NAME_SAFE.sub("-", relative_path).strip("-") or "root"
+    suffix = uuid.uuid4().hex[:8]
+    return ["--name", f"cicd-worker-{sanitized}-{suffix}"]
 
 
 def _cache_mount_flags() -> list[str]:
@@ -806,6 +835,7 @@ async def run_in_directory(relative_path: str, binary: str, args: list[str], ctx
     try:
         result = subprocess.run(
             ["docker", "run", "--rm", "-v", f"{host_path}:/workspace",
+             *_worker_name_flags(relative_path),
              *_cache_mount_flags(), *_cache_env_flags(), *_user_env_flags(), *_ulimit_flags(),
              "-w", "/workspace", image, binary, *args],
             capture_output=True,
