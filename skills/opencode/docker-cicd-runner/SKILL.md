@@ -142,6 +142,97 @@ More surprises trace to this than to anything else:
   A *subdirectory* is structurally immune, since its `../` sibling never
   resolves. Do not copy the guard where it cannot apply.
 
+## Two filesystems, and which one reads your path
+
+A path in a compose file or a `docker run` argv is resolved by one of two
+processes, and they do not see the same filesystem when the client is
+itself in a container.
+
+| Path | Read by | Must be valid for |
+|---|---|---|
+| Build context | the docker **client** | the process running the command |
+| Bind-mount source | the **daemon** | the host |
+| `-f` compose file | the client | the process running the command |
+| Image tag | the daemon's image store | neither -- it is a name, not a path |
+
+The coordinator holds the socket but sees the project through its own
+mount, so a build context under that mount works while a **relative** bind
+source silently does not: the client resolves it against its own view and
+hands the daemon a path that exists nowhere on the host.
+
+Docker does not error on that. It **creates the missing source**, as a
+root-owned empty directory -- and if the intended source was a file, the
+container gets a directory where it expected one. The symptom is never a
+path error; it is the service failing on missing content, plus a stray
+tree at the host root.
+
+The fix belongs to the **project**, because only the project knows its own
+host path. Put every bind source behind a variable that defaults to `.`,
+so a shell invocation is unchanged, and let the project's own `.env`
+supply the absolute host path for callers that see the filesystem
+differently:
+
+```yaml
+volumes:
+  - ${PROJECT_ROOT:-.}/config/auth.json:/app/auth.json:ro
+```
+
+Derive that value from the location of the file that defines it -- in a
+Makefile, `$(abspath $(lastword $(MAKEFILE_LIST)))` -- rather than from
+the caller's working directory. Prefer lexical resolution (`abspath`) over
+symlink resolution (`realpath`) when other tooling in the same project
+builds the same paths without resolving symlinks: a value that disagrees
+with them names the same file by a different string, which infrastructure
+tools read as drift.
+
+Once built, an image is referenced by **tag**, so every later operation --
+`up`, `run`, `rebuild` -- needs no context and no host path at all. Only
+the build step does.
+
+## Scoping what `container_control up` starts
+
+`up` runs `up -d` with no service argument, and nothing from the caller is
+appended. That is deliberate: a coordinator that understood individual
+projects would stop being reusable across them. So a bare `up` starts
+every service the compose file defines by default, including one-shot
+roles that then run immediately.
+
+Scoping it is the **project's** job, through Compose profiles. A service
+carrying a profile is not started by a bare `up -d`, while naming a
+service explicitly enables its profile -- so `up -d <svc>`,
+`run --rm <svc>` and `build <svc>` continue to work unchanged, and only
+the unscoped invocation changes meaning. Profiles apply to `build` as
+well, which keeps an orchestrated rebuild from building images nobody
+asked for.
+
+## The runner never acts on itself
+
+The reason this service exists is that a container cannot safely rebuild
+the container it is running in. That applies to the runner too: its own
+`start.sh` removes and recreates the coordinator's stack, so invoking it
+through `run_command` removes the container running the command before
+the recreate is issued, leaving the service down with no channel to
+recover it.
+
+Restarting or rebuilding the runner is a host-shell action, always.
+
+## Long builds and other long calls
+
+The coordinator serves calls on a single event loop, so a multi-minute
+build issued through it blocks every other call for its duration. Run
+such work **detached** instead -- a container started with `-d`, holding
+the socket and the project mount, doing the build outside the
+coordinator's request path -- and poll for its result.
+
+Two things to get right when you do:
+
+- Capture the detached container's output into the project's own log
+  directory before removing the container, or the record disappears with
+  it.
+- A pipeline driven that way runs as root, so anything it writes to the
+  bind mount -- including its own log -- lands root-owned. Hand it back to
+  the host uid in the same step.
+
 ## Choosing the tool
 
 `run_command(project=...)` uses configured named mounts. If a project has no
