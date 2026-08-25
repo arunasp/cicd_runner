@@ -20,9 +20,11 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install Python dependencies
-        run: python3 -m pip install -r server/requirements.txt
-
+      # No pip install step: `make check` depends on `make deps`, which
+      # builds a virtualenv keyed to this runner's own userland and
+      # interpreter and installs server/requirements.txt into it. An
+      # install here would land in a different interpreter than the one
+      # the suite actually runs under.
       - name: Build and check
         run: |
           ./autogen.sh
@@ -85,6 +87,18 @@ jobs:
         with:
           fetch-depth: 0   # full history -- need every existing tag to check against
 
+      # Same interpreter source as the autotools job. ./configure builds
+      # a throwaway virtualenv to prove the capability, so this job needs
+      # a venv-capable python3 even though `make dist` itself does not
+      # run any Python. setup-python guarantees one; apt-installing
+      # python3-venv would guess a package name per distribution and
+      # bind this to whatever interpreter the runner image happens to
+      # ship.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
       - name: Extract version from configure.ac
         id: version
         run: |
@@ -146,7 +160,6 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: |
           sudo apt-get update && sudo apt-get install -y autoconf automake
-          python3 -m pip install -r server/requirements.txt
           ./autogen.sh
           ./configure
           make dist

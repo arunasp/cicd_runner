@@ -1,0 +1,11 @@
+# Tools `make check` runs, as distinct from what the coordinator itself
+# imports at runtime (server/requirements.txt). Installed by `make deps`
+# into the same per-userland virtualenv, which is what makes it a local
+# cache: a userland without shellcheck on PATH gets one here once, and
+# every later run uses it offline.
+#
+# shellcheck-py ships the upstream static shellcheck binary as a wheel,
+# so this is the real tool, not a reimplementation -- and pinning it
+# here means pip's own hash checking covers the download instead of a
+# bespoke fetch-and-verify step of ours.
+shellcheck-py==0.11.0.1

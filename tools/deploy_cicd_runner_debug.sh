@@ -53,32 +53,13 @@ export SHELLOPTS
 
 declare -A RESULTS
 
-# Ensure a local .venv satisfies server/requirements.txt, creating or
-# repairing it as needed -- configure.ac (see configure.ac's own
-# comment) already prefers this over the system/conda python3
-# whenever it's present; this makes that the AUTOMATIC, handled path
-# rather than a manual step to remember and run separately each time
-# (confirmed real 2026-08-08: leaving it manual meant it kept not
-# getting done). Safe to run unconditionally -- fully local, no
-# system-wide install, no elevated privileges, idempotent (skips
-# reinstall if the venv already satisfies requirements.txt, only
-# reinstalls if something's actually missing).
-ensure_venv() {
-    if [ -x ".venv/bin/python3" ]; then
-        echo "Existing .venv found -- confirming requirements.txt is satisfied"
-        if .venv/bin/python3 server/check_requirements.py server/requirements.txt >/dev/null 2>&1; then
-            echo ".venv already satisfies requirements.txt -- nothing to do"
-            return 0
-        fi
-        echo ".venv exists but is missing something -- reinstalling"
-    else
-        echo "No .venv found -- creating one"
-        python3 -m venv .venv || return 1
-    fi
-    .venv/bin/pip install -q -r server/requirements.txt || return 1
-    echo "requirements.txt installed into .venv"
-    return 0
-}
+# ensure_venv() was REMOVED 2026-08-25, same as in the non-debug twin
+# and for the same reason: ./configure no longer prefers a root .venv
+# or bakes its interpreter into the generated Makefile, so the venv
+# this built was one nobody read. tools/venv-build.sh provisions one per
+# userland and per base interpreter via `make deps`, which `make check`
+# depends on. Not replaced by a `make deps` call here, because this
+# runs before ./configure has generated a Makefile to call.
 
 section() {
     echo ""
@@ -140,11 +121,15 @@ autotools_chain() {
 
 rescrub_check() {
     section "RE-SCRUB: grep for real username across tracked files"
-    if grep -rn "arunasp" . \
-        --exclude-dir=.git --exclude-dir=node_modules \
-        --exclude-dir=dist --exclude-dir=target --exclude-dir=logs \
-        --exclude-dir=__pycache__ --exclude-dir=.pytest_cache \
-        --exclude=.env --exclude=deploy_cicd_runner.sh --exclude=deploy_cicd_runner_debug.sh; then
+    # `git grep` rather than `grep -rn`, changed 2026-08-25 -- kept
+    # identical to the non-debug twin, which carries the full reasoning.
+    # In short: the header says TRACKED FILES, a working-tree grep is
+    # not that, and its exclude list could only ever be one directory
+    # behind reality -- a real run matched thousands of files inside
+    # virtualenvs and caches and drowned the one match that mattered.
+    if git grep -n "arunasp" -- . \
+        ':(exclude)tools/deploy_cicd_runner.sh' \
+        ':(exclude)tools/deploy_cicd_runner_debug.sh'; then
         echo ""
         echo "^^ matches found above -- review each. As of 2026-08-09 the"
         echo "   docs are meant to be fully genericized (no personal GitHub"
@@ -189,9 +174,6 @@ section "SETUP: ensure repo scripts are executable"
 chmod +x ./*.sh 2>/dev/null || true
 chmod +x desktop-extension/*.sh 2>/dev/null || true
 echo "chmod +x applied to *.sh and desktop-extension/*.sh"
-
-section "SETUP: ensure .venv satisfies server/requirements.txt"
-ensure_venv || echo "WARNING: .venv setup failed -- autotools chain will likely fail too"
 
 run_section "autotools" autotools_chain
 run_section "rescrub"   rescrub_check

@@ -9,10 +9,13 @@ make
 make check
 ```
 
-`./configure` prefers a local `.venv` when present (for `pytest`/`mcp`), falling
-back to the system `python3` otherwise. Create one with `python3 -m venv .venv
-&& .venv/bin/pip install -r server/requirements.txt` if you'd rather not
-install dependencies system-wide.
+`make check` provisions its own Python environment: `make deps` (which it
+depends on) builds a virtualenv under `.cicd-runner-cache/`, keyed by both
+the userland and the base interpreter, and rebuilds it if that interpreter
+changes or stops working. Nothing needs creating by hand, and nothing is
+installed system-wide. Point `PYTHON3` at a different interpreter to base
+it on that one instead — it gets its own virtualenv rather than reusing
+another's.
 
 ## Running tests
 

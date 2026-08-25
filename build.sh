@@ -19,7 +19,11 @@
 #   all         - both of the above, in order (default if no stage given)
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# `pwd -P` for the same reason start.sh uses it: this resolves the
+# checkout's real location, and a build context reached through a
+# symlink is not the same thing to the docker daemon as the path it
+# points at.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "${script_dir}"
 
 declare -a FAILED_STAGES=()
@@ -46,16 +50,12 @@ stage_worker() {
 }
 
 stage_coordinator() {
-    local compose_cmd
-    if docker compose version &>/dev/null; then
-        compose_cmd=(docker compose)
-    elif command -v docker-compose &>/dev/null; then
-        compose_cmd=(docker-compose)
-    else
-        echo "  (neither 'docker compose' (v2) nor 'docker-compose' (v1) found)" >&2
-        return 1
-    fi
-    "${compose_cmd[@]}" build
+    # Detection lives in compose.sh, not here -- see its own header.
+    # This used to be a third copy of the same three-branch logic
+    # (configure.ac and start.sh had the others), which is exactly the
+    # drift this project already refused to accept between start.sh and
+    # build.sh's own build steps.
+    "${script_dir}/tools/compose.sh" build
 }
 
 stages=("${@:-all}")

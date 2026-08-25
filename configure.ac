@@ -38,10 +38,24 @@ dnl mismatch exactly), ran `make` from the new path -- Automake's own
 dnl auto-regeneration chain fired and succeeded correctly, where it
 dnl previously failed with "No such file or directory" on the old,
 dnl host-only absolute path.
+dnl The names are UNVERSIONED (`automake`, not `automake-1.16`).
+dnl Automake's own default is versioned, which is right for a tree whose
+dnl generated files are committed and must be reproduced by one exact
+dnl release. Here they are not: Makefile.in, configure and aclocal.m4
+dnl are all gitignored, so every userland regenerates its own. Pinning a
+dnl version therefore froze a per-userland fact into a shared checkout
+dnl -- the same mistake COMPOSE_CMD and PYTHON3 made. Confirmed live
+dnl 2026-08-25: automake 1.17 in the worker image and 1.18.1 on the
+dnl host, so the pin at 1.16 matched NEITHER; whichever one it named,
+dnl the userlands that had a different one saw their `missing`
+dnl wrapper degraded to a warning and a touch, leaving a stale generated
+dnl file behind while reporting success. Unversioned means each userland
+dnl uses the automake it has, and a genuine incompatibility is reported
+dnl by automake itself rather than silently skipped.
 MISSING='${SHELL} missing'
-ACLOCAL='${SHELL} missing --run aclocal-1.16'
+ACLOCAL='${SHELL} missing --run aclocal'
 AUTOCONF='${SHELL} missing --run autoconf'
-AUTOMAKE='${SHELL} missing --run automake-1.16'
+AUTOMAKE='${SHELL} missing --run automake'
 AUTOHEADER='${SHELL} missing --run autoheader'
 MAKEINFO='${SHELL} missing --run makeinfo'
 export MISSING ACLOCAL AUTOCONF AUTOMAKE AUTOHEADER MAKEINFO
@@ -55,11 +69,19 @@ AC_CHECK_PROG([DOCKER], [docker], [docker], [])
 AS_IF([test -z "$DOCKER"],
       [AC_MSG_ERROR([docker is required but was not found -- see README.md])])
 
-dnl docker compose (v2 plugin) or docker-compose (v1 binary) -- same
-dnl lazy, either-is-fine detection philosophy as build.sh's own
-dnl stage_coordinator() and the Makefile's stop/logs/status targets,
-dnl surfaced here too so a missing compose entirely is caught at
-dnl configure time, not partway through a build.
+dnl docker compose (v2 plugin) or docker-compose (v1 binary) -- checked
+dnl here only so a userland with NEITHER fails at configure time rather
+dnl than partway through a build. The answer is deliberately NOT
+dnl substituted into the Makefile any more: it is a property of the
+dnl USERLAND, and this checkout is read by two boots and two container
+dnl images with four different inventories. Machine and distribution
+dnl are only proxies for that -- the coordinator and the host it runs
+dnl on are one machine of one distribution and still disagree. A value
+dnl frozen here is
+dnl wrong everywhere except where configure ran (confirmed live
+dnl 2026-08-25 -- see compose.sh's own header). compose.sh detects at
+dnl invocation instead, and build.sh, start.sh and the Makefile all
+dnl route through it.
 AC_MSG_CHECKING([for docker compose (v2 plugin)])
 AS_IF(["$DOCKER" compose version >/dev/null 2>&1],
       [have_compose_v2=yes], [have_compose_v2=no])
@@ -70,67 +92,61 @@ AS_IF([test "x$have_compose_v2" = xno], [
         [AC_MSG_ERROR([neither 'docker compose' (v2) nor 'docker-compose' (v1) found])])
 ])
 
-dnl Substitute the actual compose command ONCE, here, at configure
-dnl time -- not re-detected via $(shell ...) on every `make` call
-dnl (automake's own -Wall -Werror correctly flags $(shell ...) as a
-dnl non-POSIX GNU Make extension; this is the genuinely idiomatic fix,
-dnl not a workaround -- also cheaper, since detection now happens once
-dnl instead of on every stop/logs/status invocation). By this point
-dnl either v2 or v1 is guaranteed present (the AS_IF block above
-dnl already exits via AC_MSG_ERROR if neither is), so Makefile.am's
-dnl targets that use @COMPOSE_CMD@ don't need their own empty-value
-dnl guard either.
-AS_IF([test "x$have_compose_v2" = xyes],
-      [COMPOSE_CMD="docker compose"],
-      [COMPOSE_CMD="docker-compose"])
-AC_SUBST([COMPOSE_CMD])
+dnl Substituting the compose command was REMOVED 2026-08-25. It was
+dnl done here once at configure time, which is cheaper and looked
+dnl idiomatic, but froze a per-userland fact into a file shared across
+dnl userlands. compose.sh owns the detection now; nothing is AC_SUBST'd
+dnl for it, and Makefile.am's COMPOSE points at that script.
 
 dnl python3 is required to run the real committed test suite
 dnl (server/test_bash_mcp_server.py) that `make check` runs -- not
 dnl for building anything, this project ships pure Python source, not
 dnl compiled output.
 dnl
-dnl Prefer a local .venv's own python3 if the project has one --
-dnl isolates this project's host-side test dependencies (mcp, pytest)
-dnl from the system/conda Python, avoiding exactly the "Defaulting to
-dnl user installation because normal site-packages is not writeable"
-dnl warning a bare system pip install produces (confirmed live
-dnl 2026-08-08). Not auto-created by configure -- create one
-dnl explicitly first if you want this path used:
-dnl `python3 -m venv .venv && .venv/bin/pip install -r
-dnl server/requirements.txt`. Falls back to whatever python3 is on
-dnl PATH if no .venv exists, same detection as before.
-AS_IF([test -x "$srcdir/.venv/bin/python3"],
-      [PYTHON3="$srcdir/.venv/bin/python3"
-       AC_MSG_NOTICE([using local .venv: $PYTHON3])],
-      [AC_CHECK_PROG([PYTHON3], [python3], [python3], [])])
+dnl Prefer nothing here: PYTHON3 is only the BASE interpreter venv-build.sh
+dnl uses to create the venv `make check` runs in. It used to prefer a
+dnl local .venv if one existed at configure time, which baked
+dnl `./.venv/bin/python3` into the generated Makefile -- and a venv's
+dnl own bin/python3 is a symlink to whatever created it, so the baked
+dnl path is valid only in that one userland. Confirmed live 2026-08-25:
+dnl exit 127 inside the coordinator container, whose image contains no
+dnl such interpreter. venv-build.sh
+dnl now keys a venv per userland and rebuilds one whose interpreter no
+dnl longer runs -- see its own header.
+AC_CHECK_PROG([PYTHON3], [python3], [python3], [])
 AS_IF([test -z "$PYTHON3"],
       [AC_MSG_ERROR([python3 is required to run the test suite but was not found])])
 
-dnl `make check` runs server/test_bash_mcp_server.py directly on the
-dnl HOST (testing the source before it's installed, not inside
-dnl Docker) -- that module transitively needs every package in
-dnl server/requirements.txt, not just python3 existing. Confirmed
-dnl live 2026-08-08 in two separate rounds, found one package at a
-dnl time as each surfaced its own fresh mid-build failure (pytest
-dnl missing, then -- once that was fixed -- mcp missing one layer
-dnl deeper). Rather than keep adding a new hardcoded per-package
-dnl AC_MSG_CHECKING every time another one surfaces, check the WHOLE
-dnl requirements.txt generically, once, via server/check_requirements.py
-dnl -- any future addition to requirements.txt is covered
-dnl automatically, no configure.ac edit ever needed again. That
-dnl script was originally embedded directly here as inline Python,
-dnl but M4 was found to strip literal `[`/`]` array-indexing syntax
-dnl from code embedded inline (M4's own quote characters) -- moved to
-dnl a real file, which sidesteps the quoting problem entirely and is
-dnl independently testable on its own.
-AC_MSG_CHECKING([whether server/requirements.txt is satisfied via $PYTHON3])
-requirements_missing=`"$PYTHON3" server/check_requirements.py server/requirements.txt 2>&1`
-requirements_status=$?
-AS_IF([test "$requirements_status" -eq 0],
-      [AC_MSG_RESULT([yes])],
+dnl What `make check` needs from this interpreter is no longer "has
+dnl every package in server/requirements.txt" -- venv-build.sh installs
+dnl those into a per-userland venv at recipe time, and healing that is
+dnl the whole point of it. What IS required is that this interpreter
+dnl can CREATE a venv, which a stripped-down system python3 cannot
+dnl (Debian-family splits ensurepip into python3-venv). Checking that
+dnl here keeps the fail-fast property the old requirements check had,
+dnl without freezing a package inventory taken in one userland into a
+dnl Makefile read on four. The old check called
+dnl server/check_requirements.py, which had no other caller and no
+dnl tests; it was removed with this change rather than left in the tree
+dnl as something that merely still works.
+dnl
+dnl This ACTUALLY CREATES a throwaway virtualenv rather than importing
+dnl `ensurepip` and `venv` and calling that proof. Those imports are a
+dnl proxy: they can both succeed while `python3 -m venv` still fails --
+dnl a partially packaged ensurepip, a wheel bundle the split package
+dnl was supposed to supply, a pip that cannot bootstrap. The whole
+dnl point of this check is fail-fast, and a proxy that passes when the
+dnl real thing would fail is worse than no check, because it moves the
+dnl failure to `make check` while reporting success here. The probe
+dnl builds into a mktemp -d directory of its own and removes only that.
+AC_MSG_CHECKING([whether $PYTHON3 can create a virtualenv])
+venv_probe_dir=`mktemp -d 2>/dev/null || echo ./conftest-venv-probe`
+AS_IF(["$PYTHON3" -m venv "$venv_probe_dir/probe" >/dev/null 2>&1 && test -x "$venv_probe_dir/probe/bin/python3"],
+      [AC_MSG_RESULT([yes])
+       rm -rf "$venv_probe_dir"],
       [AC_MSG_RESULT([no])
-       AC_MSG_ERROR([server/requirements.txt not satisfied via '$PYTHON3' -- missing: $requirements_missing. Install via '$PYTHON3 -m pip install -r server/requirements.txt', or point PYTHON3 at a different interpreter that has it])])
+       rm -rf "$venv_probe_dir"
+       AC_MSG_ERROR([$PYTHON3 cannot create a virtualenv -- install the venv/ensurepip module for it (e.g. python3-venv on Debian-family) or point PYTHON3 at an interpreter that has it])])
 
 dnl node/npm/npx are OPTIONAL -- only needed for the Desktop extension
 dnl (`make build-extension`), which is itself optional; the core

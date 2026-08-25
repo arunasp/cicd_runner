@@ -12,7 +12,7 @@ disposable ephemeral containers.
 - [Quick start](#quick-start)
 - [Installation](#installation)
   - [Get the service running](#get-the-service-running)
-  - [Full verification (deploy_cicd_runner.sh)](#full-verification-deploy_cicd_runnersh)
+  - [Full verification (tools/deploy_cicd_runner.sh)](#full-verification-toolsdeploy_cicd_runnersh)
   - [Connect a client](#connect-a-client)
   - [Claude Desktop](#claude-desktop)
   - [opencode (project scope)](#opencode-project-scope)
@@ -146,9 +146,9 @@ Day-to-day, `make start` / `make stop` / `make restart` cover
 relaunching without a full rebuild; `make build` rebuilds the Docker
 images first if the coordinator or worker source changed.
 
-### Full verification (`deploy_cicd_runner.sh`)
+### Full verification (`tools/deploy_cicd_runner.sh`)
 
-`./deploy_cicd_runner.sh` is a different tool for a different job —
+`./tools/deploy_cicd_runner.sh` is a different tool for a different job —
 not a lighter alternative to `make all`, a heavier one. It runs the
 entire Autotools chain (`autogen.sh`, `configure`, `make`,
 `make check`, a staged `make install`/`make uninstall` round-trip,
@@ -718,9 +718,39 @@ sudo make install     # optional -- stages a copy under $(pkgdatadir)
 ```
 
 `configure` checks for Docker (required), `docker compose`/`docker-compose`
-(either), Python 3 with every package in `server/requirements.txt`
-importable (preferring a local `.venv` if one exists), and
-`node`/`npm`/`npx` (optional — only needed for the Desktop extension).
+(either — only that one of them exists; *which* one is not recorded, see
+below), Python 3 able to create a virtualenv, and `node`/`npm`/`npx`
+(optional — only needed for the Desktop extension).
+
+What `configure` deliberately does **not** do is substitute either
+answer into the generated `Makefile`. Both are facts about the installed
+tool inventory of a *userland*, and one checkout is read by several —
+two host boots and two container images here. A value frozen at
+configure time is correct only in the userland that ran it: a `Makefile`
+generated where only compose v1 existed made `make stop`/`logs`/`status`
+fail with exit 127 everywhere that has the v2 plugin instead, including
+the coordinator container running on the very same host. Machine and
+distribution both look like usable keys for this and both fail — the
+coordinator and its host are one machine of one distribution and still
+disagree.
+
+So the two facts are resolved where the work happens:
+
+- `tools/compose.sh` picks `docker compose` or `docker-compose` at
+  invocation and exits 127 with a real message if neither is present.
+  `build.sh`, `start.sh` and the `stop`/`logs`/`status` targets all
+  route through it, so there is one implementation rather than four.
+- `tools/venv-build.sh` provisions the virtualenv `make check` runs in, keyed
+  by both the userland (`/etc/os-release` plus architecture — an ABI
+  claim, since compiled wheels link against that userland's libraries)
+  and the identity of the base interpreter itself. One userland holds
+  several interpreters, so the ABI half alone is not enough to tell them
+  apart. It validates an existing venv against its own `pyvenv.cfg`
+  rather than testing whether `bin/python3` is executable — the latter
+  catches only a *dangling* interpreter, while a base that exists but is
+  the wrong one leaves the venv looking fine and silently runs the suite
+  in an environment nobody asked for. `make deps` invokes it as a stage
+  of its own; `make check` depends on that stage.
 
 `make install` stages a full copy under `$(DESTDIR)$(pkgdatadir)`
 (default `/usr/local/share/cicd-runner`) without launching anything;
@@ -762,6 +792,9 @@ this exists so the regeneration itself doesn't strictly require one.
 make build            # ./build.sh          -- runner images only
 make build-extension  # ./desktop-extension/build.sh
 make build-all        # both
+make deps             # tools/venv-build.sh -- provision/heal the test virtualenv
+make env-check        # tools/venv-check.sh -- is that virtualenv current? changes nothing
+make modes-check      # every directly-executed script is 100755 in the git index
 make start            # ./start.sh (builds runner, then launches)
 make stop / restart / logs / status
 make all              # build-all + start
@@ -784,8 +817,8 @@ containers — that's the credential boundary working as designed, not
 a bug in the target.
 
 `build.sh` builds the worker and coordinator images and needs only
-`docker` — `docker compose`/`docker-compose` is detected lazily, only
-when the coordinator stage needs it.
+`docker` — compose is needed by the coordinator stage alone, and is
+resolved there through `tools/compose.sh`.
 
 `desktop-extension/build.sh` builds the Desktop `.mcpb` package
 separately, since it needs Node rather than the runner's own
@@ -862,7 +895,7 @@ The core service (coordinator + ephemeral worker) is implemented,
 tested, and in use. Both the Desktop `.mcpb` connector and the
 opencode remote-MCP config work against real client sessions.
 
-Covered by committed tests (`server/test_bash_mcp_server.py`, 85 cases):
+Covered by committed tests (`server/test_bash_mcp_server.py`, 89 cases):
 path resolution and traversal/symlink-escape defense, per-call config
 resolution (`.cicd-image`, `CACHE_ROOT`, `HOST_UID`/`HOST_GID`), and
 [Directory ACLs](#directory-acls) (MCP roots + `opencode.json`

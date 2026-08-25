@@ -11,7 +11,7 @@
 # entirely (so this runs as root first, each step reporting its own
 # exit code independently):
 #
-#   docker run --rm -v "$(pwd)/debug_worker.sh:/debug.sh" --entrypoint sh cicd-worker /debug.sh
+#   docker run --rm -v "$(pwd)/tools/debug_worker.sh:/debug.sh" --entrypoint sh cicd-worker /debug.sh
 set -x
 
 echo "=== 1. confirm baked-in user exists ==="

@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# `pwd -P` -- PHYSICAL, symlinks resolved. Not cosmetic: DYNAMIC_ROOT
+# below is derived from this and is handed to Docker as a bind-mount
+# SOURCE, and the coordinator also existence-checks paths under it
+# through its own read-only /dynamic-root mount. If this directory is
+# reached through a symlink, the mount carries the symlinks themselves
+# rather than what they point at, and every entry under it dangles
+# inside the container -- confirmed live 2026-08-25: launching via a
+# `~/stuff` that symlinks into another filesystem made every
+# run_in_directory() target fail the dynamic-root check, while
+# cicd_runner itself kept working because it has its own named mount.
+# A logical `pwd` records the path the caller typed; a bind mount needs
+# the path the daemon can actually resolve.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "${script_dir}"
 
 if [[ ! -f .env ]]; then
@@ -68,14 +80,10 @@ mkdir -p "${CACHE_ROOT}"
 # being the one to create them first.
 mkdir -p "${CACHE_ROOT}/npm" "${CACHE_ROOT}/pip" "${CACHE_ROOT}/cargo-registry" "${CACHE_ROOT}/cargo-git"
 
-if docker compose version &>/dev/null; then
-    compose() { docker compose "$@"; }
-elif command -v docker-compose &>/dev/null; then
-    compose() { docker-compose "$@"; }
-else
-    echo "error: neither 'docker compose' (v2) nor 'docker-compose' (v1) found" >&2
-    exit 1
-fi
+# Detection lives in compose.sh -- one implementation, routed through
+# by this script, build.sh and the Makefile alike. See its own header
+# for why it is no longer substituted at ./configure time.
+compose() { "${script_dir}/tools/compose.sh" "$@"; }
 
 # Drop any existing container before recreating it -- same
 # docker-compose v1 KeyError: 'ContainerConfig' recreate bug as

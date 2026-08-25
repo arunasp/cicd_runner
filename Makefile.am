@@ -14,6 +14,22 @@ ACLOCAL_AMFLAGS = -I m4
 # documented escape hatch for exactly that limitation, not an
 # invented deviation from it.
 dist_pkgdata_SCRIPTS = build.sh start.sh
+
+# tools/ holds the scripts nothing human invokes directly -- compose.sh
+# venv-build.sh and venv-check.sh are called by the targets below and by build.sh/start.sh;
+# debug_worker.sh and the deploy_* pair are diagnostics. build.sh,
+# start.sh and autogen.sh deliberately stay at the root: they are the
+# documented entry points, named in README.md and in this file's own
+# install-data-local message.
+#
+# `nobase_` is what stops automake FLATTENING these into pkgdatadir --
+# a plain dist_pkgdata_SCRIPTS entry of `tools/compose.sh` installs as
+# pkgdatadir/compose.sh, which would break build.sh's and start.sh's
+# own tools/compose.sh reference in an installed copy while leaving the
+# checkout working. The deploy_* and debug scripts are deliberately not
+# listed at all, exactly as before the move: they were never installed
+# or distributed, and this is a relocation, not a change of what ships.
+nobase_dist_pkgdata_SCRIPTS = tools/compose.sh tools/venv-build.sh tools/venv-check.sh tools/shellcheck.sh
 dist_pkgdata_DATA = docker-compose.yml .env.example README.md
 
 # `make` / `make all` -- delegates to build.sh (worker + coordinator
@@ -37,12 +53,20 @@ all-local:
 # (check/install/uninstall/dist/clean) and this project's own richer
 # daily-use one, instead of two separate files racing for the same
 # name. None of the names below collide with Automake's own reserved
-# targets. `COMPOSE` is substituted from configure.ac's own
-# v2-plugin-vs-v1-binary detection (COMPOSE_CMD, AC_SUBST'd) rather
-# than re-detected here via $(shell ...) -- automake's own -Wall
-# -Werror correctly flags $(shell ...) as a non-POSIX GNU Make
-# extension, and doing it once at configure time is cheaper anyway.
-COMPOSE = @COMPOSE_CMD@
+# targets. `COMPOSE` is a WRAPPER SCRIPT, not a substituted value:
+# compose.sh detects v2-plugin-vs-v1-binary at invocation. It used to
+# be a COMPOSE_CMD value substituted once by ./configure -- which froze a
+# property of the USERLAND into a file this checkout shares between two
+# boots and two container images. Confirmed live 2026-08-25: a Makefile
+# generated where only compose v1 existed baked `docker-compose`, and
+# stop/logs/status then failed with exit 127 both on a host with only
+# the v2 plugin and inside the coordinator container, neither of which
+# had the v1 binary. There is still no $(shell ...) here -- automake's
+# own -Wall -Werror correctly flags that as a non-POSIX GNU Make extension
+# -- the detection simply lives in the script, which build.sh and
+# start.sh also route through, so there is ONE implementation of it
+# rather than four drifting copies.
+COMPOSE = $(SHELL) $(srcdir)/tools/compose.sh
 
 # FIXED 2026-08-09 (was a KNOWN LIMITATION until Arunas asked "what
 # if we define missing becoming defined" -- correct instinct, and a
@@ -86,12 +110,15 @@ COMPOSE = @COMPOSE_CMD@
 # for THIS specific failure (though still generally sound practice
 # after any Makefile.am/configure.ac edit).
 
-.PHONY: help build build-extension build-all start stop restart logs status health-check push skills-check
+.PHONY: help build build-extension build-all start stop restart logs status health-check push skills-check deps env-check modes-check
 
 help:
 	@echo "Autotools-standard targets: check install uninstall dist clean"
 	@echo "This project's own daily-use targets:"
 	@echo "  build           - build cicd-runner's own images (worker + coordinator)"
+	@echo "  deps            - provision (and heal) the Python env 'make check' runs in"
+	@echo "  env-check       - report whether that env is current; changes nothing"
+	@echo "  modes-check     - prove every directly-executed script is 100755 in the index"
 	@echo "  build-extension - build the Claude Desktop .mcpb connector"
 	@echo "  build-all       - both of the above"
 	@echo "  start           - build (runner only) + launch (./start.sh)"
@@ -196,25 +223,98 @@ health-check:
 	test -S /var/run/docker.sock || { echo "UNHEALTHY: docker socket missing" >&2; exit 1; }; \
 	echo "OK"
 
+# `make env-check` -- report only, changes nothing. tools/venv-check.sh
+# owns the decision `deps` acts on, and exposing it as its own target
+# means the decision can be asked about without provoking a rebuild to
+# find out what it would have been. Exit status is the answer: 0
+# current, 1 stale, 2 no usable base interpreter, 3 a requirements file
+# named here is missing.
+env-check: ## Report whether the test environment is current, changing nothing
+	@PYTHON3="$(PYTHON3)" VENV_ROOT="$(srcdir)/.cicd-runner-cache/venv" $(SHELL) $(srcdir)/tools/venv-check.sh \
+		server/requirements.txt requirements-dev.txt >/dev/null \
+		&& echo "env: current"
+
+# `make deps` -- provisioning as a NAMED STAGE rather than a fragment
+# buried in check-local's recipe, so it can be invoked on its own
+# (through the runner, from CI, or by hand) and so a failure to build
+# the environment is reported as that, not as a test failure.
+#
+# tools/venv-build.sh is idempotent: it asks tools/venv-check.sh whether the
+# environment is current and does nothing at all when it is. That is
+# why check-local can both DEPEND on this target and still call the
+# script itself to capture the path -- the second call does no work.
+# Stdout is dropped here because this target provisions rather than
+# resolves; the path is the caller's business.
+deps: ## Provision the Python environment make check runs in
+	@PYTHON3="$(PYTHON3)" VENV_ROOT="$(srcdir)/.cicd-runner-cache/venv" $(SHELL) $(srcdir)/tools/venv-build.sh \
+		server/requirements.txt requirements-dev.txt >/dev/null
+
+# Scripts this project executes DIRECTLY, and which must therefore stay
+# executable in the INDEX rather than merely in someone's working tree.
+# Deliberately an explicit list rather than a glob over *.sh: it is not
+# true of every script here. worker/entrypoint.sh is 100644 on purpose
+# (its Dockerfile chmods it after COPY), and examples/hello-bash/*.sh
+# are invoked through make, never as commands.
+#
+# The gate exists because losing the bit is silent and easy: an editor
+# or a connector that rewrites a file in place can drop it, git records
+# the change as an ordinary modification, and the script keeps working
+# for whoever still has it executable locally. It broke build.sh and
+# start.sh here on 2026-08-25 and was noticed only by chance.
+# NOTE ON THE NAME: not EXEC_SCRIPTS. Any variable ending in _SCRIPTS
+# is an automake PRIMARY, and automake rejects one without a matching
+# `EXECdir` -- caught immediately by -Wall -Werror rather than becoming
+# a silent misinstall.
+EXEC_BITS = autogen.sh build.sh start.sh \
+	tools/compose.sh tools/venv-build.sh tools/venv-check.sh tools/shellcheck.sh \
+	tools/debug_worker.sh \
+	tools/deploy_cicd_runner.sh tools/deploy_cicd_runner_debug.sh \
+	desktop-extension/build.sh
+
+# Degrades to a skip outside a git checkout -- `make check` has to work
+# from an unpacked `make dist` tarball, where there is no index to ask.
+# Same SKIP-not-FAIL treatment shellcheck gets below.
+modes-check: ## Prove every directly-executed script is 100755 in the index
+	@if git -C $(srcdir) rev-parse --git-dir >/dev/null 2>&1; then \
+		bad=0; \
+		for f in $(EXEC_BITS); do \
+			mode=`git -C $(srcdir) ls-files -s -- "$$f" | awk '{print $$1}'`; \
+			if [ "$$mode" != 100755 ]; then \
+				echo "not executable in the index: $$f (mode $${mode:-absent})" >&2; \
+				bad=1; \
+			fi; \
+		done; \
+		if [ "$$bad" -ne 0 ]; then \
+			echo "fix with: git update-index --chmod=+x <file>" >&2; \
+			exit 1; \
+		fi; \
+		echo "modes: every directly-executed script is 100755 in the index"; \
+	else \
+		echo "not a git checkout -- skipping the mode check (not required)"; \
+	fi
+
 # `make check` -- the real, committed pytest suite
 # (server/test_bash_mcp_server.py, covering path-resolution,
 # per-call config resolution, and the directory-ACL/roots logic
 # added 2026-08-09). --asyncio-mode=auto is needed for the async
 # test cases covering the MCP roots integration (pytest-asyncio,
-# added to server/requirements.txt alongside this). Also runs
-# shellcheck against this project's own shell scripts when it's on
-# PATH -- optional, matches build.sh's own SKIP-not-FAIL treatment
-# of missing-but-not-required tools; `./configure` does not check
-# for shellcheck since `check` is the only thing that needs it and
-# it degrades gracefully.
-check-local: skills-check
-	$(PYTHON3) -m pytest server/test_bash_mcp_server.py -v --asyncio-mode=auto
-	@if command -v shellcheck >/dev/null 2>&1; then \
-		echo "Running shellcheck..." ; \
-		shellcheck -x -P SCRIPTDIR build.sh start.sh desktop-extension/build.sh ; \
-	else \
-		echo "shellcheck not found on PATH -- skipping (not required)" ; \
-	fi
+# added to server/requirements.txt alongside this).
+#
+# The shellcheck step is NOT optional any more. It used to test
+# `command -v shellcheck` and print "skipping (not required)" when it
+# was absent, which made the lint result depend on which userland ran
+# the suite -- it had been skipping on one of this checkout's two boots
+# and passing on the other. tools/shellcheck.sh resolves one from PATH
+# or from the venv `make deps` builds, so absence is now a `make deps`
+# away rather than a reason to pass without checking.
+check-local: skills-check modes-check deps
+	@py=$$(PYTHON3="$(PYTHON3)" VENV_ROOT="$(srcdir)/.cicd-runner-cache/venv" $(SHELL) $(srcdir)/tools/venv-build.sh \
+		server/requirements.txt requirements-dev.txt) && \
+		"$$py" -m pytest server/test_bash_mcp_server.py -v --asyncio-mode=auto
+	@echo "Running shellcheck..."
+	@$(SHELL) $(srcdir)/tools/shellcheck.sh -x -P SCRIPTDIR \
+		build.sh start.sh tools/compose.sh tools/venv-build.sh \
+		tools/venv-check.sh tools/shellcheck.sh desktop-extension/build.sh
 
 # Skills are published in two formats from one source of truth: the
 # browsable skills/opencode/<name>/ trees, and the packaged
@@ -227,11 +327,14 @@ check-local: skills-check
 # command runs locally, in a worker, and in CI. Stdlib only, so it runs
 # anywhere python3 does.
 # validate.py is stdlib-only by design, so this target deliberately does
-# NOT use $(PYTHON3). ./configure resolves that to the interpreter it
-# found on the host -- here a .venv whose python3 is a symlink into a
-# conda install -- which does not exist inside a worker container, so the
-# symlink dangles and the target dies with exit 127. Plain python3 from
-# PATH works on the host and in any worker, which is the whole point of
+# NOT use $(PYTHON3), and does not go through tools/venv-build.sh either.
+# $(PYTHON3) is only a BASE interpreter for building a virtualenv, and
+# the virtualenv itself belongs to one userland -- neither is available
+# unchanged inside a worker container. The original failure was exactly
+# that: ./configure had resolved $(PYTHON3) to a venv whose python3 was
+# a symlink into an interpreter the worker does not have, so the symlink
+# dangled and the target died with exit 127. Plain python3 from PATH
+# works on any host and in any worker, which is the whole point of
 # keeping validate.py dependency-free.
 SKILLS_PYTHON ?= python3
 
@@ -320,6 +423,7 @@ EXTRA_DIST = \
 	.gitignore \
 	CHANGELOG.md \
 	pytest.ini \
+	requirements-dev.txt \
 	server worker examples skills \
 	AGENTS.md CLAUDE.md \
 	desktop-extension/index.js desktop-extension/manifest.json \

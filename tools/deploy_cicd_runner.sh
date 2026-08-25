@@ -19,32 +19,19 @@ LOG_FILE="logs/$(date -u +%Y%m%dT%H%M%SZ)-local-verification.log"
 
 declare -A RESULTS
 
-# Ensure a local .venv satisfies server/requirements.txt, creating or
-# repairing it as needed -- configure.ac (see configure.ac's own
-# comment) already prefers this over the system/conda python3
-# whenever it's present; this makes that the AUTOMATIC, handled path
-# rather than a manual step to remember and run separately each time
-# (confirmed real 2026-08-08: leaving it manual meant it kept not
-# getting done). Safe to run unconditionally -- fully local, no
-# system-wide install, no elevated privileges, idempotent (skips
-# reinstall if the venv already satisfies requirements.txt, only
-# reinstalls if something's actually missing).
-ensure_venv() {
-    if [ -x ".venv/bin/python3" ]; then
-        echo "Existing .venv found -- confirming requirements.txt is satisfied"
-        if .venv/bin/python3 server/check_requirements.py server/requirements.txt >/dev/null 2>&1; then
-            echo ".venv already satisfies requirements.txt -- nothing to do"
-            return 0
-        fi
-        echo ".venv exists but is missing something -- reinstalling"
-    else
-        echo "No .venv found -- creating one"
-        python3 -m venv .venv || return 1
-    fi
-    .venv/bin/pip install -q -r server/requirements.txt || return 1
-    echo "requirements.txt installed into .venv"
-    return 0
-}
+# ensure_venv() was REMOVED 2026-08-25. It created a root .venv and
+# checked it with a requirements script that has since been removed,
+# because ./configure used to prefer such a venv and bake its
+# interpreter path into the generated Makefile. That arrangement is
+# gone: a venv belongs to the userland that built it, and this one sat
+# in a checkout read by several. tools/venv-build.sh now provisions one per
+# userland and per base
+# interpreter, invoked by `make deps`, which `make check` depends on --
+# so the autotools chain below provisions its own environment and this
+# step had nothing left to do but rebuild a venv nobody reads.
+#
+# It is not replaced by a `make deps` call here either: this runs
+# BEFORE ./configure, so there is no generated Makefile yet to call.
 
 section() {
     echo ""
@@ -106,11 +93,20 @@ autotools_chain() {
 
 rescrub_check() {
     section "RE-SCRUB: grep for real username across tracked files"
-    if grep -rn "arunasp" . \
-        --exclude-dir=.git --exclude-dir=node_modules \
-        --exclude-dir=dist --exclude-dir=target --exclude-dir=logs \
-        --exclude-dir=__pycache__ --exclude-dir=.pytest_cache \
-        --exclude=.env --exclude=deploy_cicd_runner.sh --exclude=deploy_cicd_runner_debug.sh; then
+    # `git grep` rather than `grep -rn`, changed 2026-08-25. The header
+    # above always said TRACKED FILES, but a working-tree grep walks
+    # everything and needed a hand-maintained --exclude-dir list that
+    # could only ever be one directory behind reality. It was: `.venv`
+    # was never on it, and once tools/venv-build.sh began building venvs
+    # under .cicd-runner-cache/ the same gap widened -- a venv's own
+    # bin/ shebangs and pyvenv.cfg carry absolute paths, so a real run
+    # matched over three thousand files and drowned the one match that
+    # mattered. git grep searches the index, which is exactly the set
+    # this check is about, and needs no exclusions beyond this script
+    # and its debug twin (which contain the search term by necessity).
+    if git grep -n "arunasp" -- . \
+        ':(exclude)tools/deploy_cicd_runner.sh' \
+        ':(exclude)tools/deploy_cicd_runner_debug.sh'; then
         echo ""
         echo "^^ matches found above -- review each. As of 2026-08-09 the"
         echo "   docs are meant to be fully genericized (no personal GitHub"
@@ -161,9 +157,6 @@ echo "Logging full output to ${LOG_FILE}"
     chmod +x desktop-extension/*.sh 2>/dev/null || true
     echo "chmod +x applied to *.sh and desktop-extension/*.sh"
 } >> "${LOG_FILE}" 2>&1
-
-section "SETUP: ensure .venv satisfies server/requirements.txt"
-ensure_venv >> "${LOG_FILE}" 2>&1 || echo "WARNING: .venv setup failed -- autotools chain will likely fail too"
 
 run_section "autotools" autotools_chain
 run_section "rescrub"   rescrub_check
