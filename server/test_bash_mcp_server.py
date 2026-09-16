@@ -718,3 +718,115 @@ class TestContainerActions:
             assert isinstance(steps, tuple), name
             for step in steps:
                 assert all(isinstance(a, str) for a in step), name
+
+
+class TestChildKwargs:
+    """Coordinator children run as HOST_UID:HOST_GID, never as root when
+    those are configured."""
+
+    @staticmethod
+    def _configure(monkeypatch, tmp_path, socket_gid=None, uid="1000", gid="1000"):
+        monkeypatch.setattr(srv, "HOST_UID", uid)
+        monkeypatch.setattr(srv, "HOST_GID", gid)
+        monkeypatch.setattr(srv.os, "geteuid", lambda: 0)
+        monkeypatch.setattr(srv, "_ensure_host_user", lambda: None)
+        entry = type("E", (), {"pw_dir": "/home/cicd", "pw_name": "cicd"})()
+        monkeypatch.setattr(srv.pwd, "getpwuid", lambda _uid: entry)
+        sock = tmp_path / "docker.sock"
+        if socket_gid is not None:
+            sock.write_text("")
+            real_stat = Path.stat
+
+            def fake_stat(self, *a, **kw):
+                st = real_stat(self, *a, **kw)
+                if self == sock:
+                    return type("S", (), {"st_gid": socket_gid})()
+                return st
+            monkeypatch.setattr(Path, "stat", fake_stat)
+        monkeypatch.setattr(srv, "DOCKER_SOCKET_PATH", sock)
+
+    def test_unconfigured_uid_leaves_children_unchanged(self, monkeypatch):
+        monkeypatch.setattr(srv, "HOST_UID", "")
+        monkeypatch.setattr(srv, "HOST_GID", "")
+        assert srv._child_kwargs() == ({}, None)
+
+    def test_non_root_coordinator_leaves_children_unchanged(self, monkeypatch):
+        monkeypatch.setattr(srv, "HOST_UID", "1000")
+        monkeypatch.setattr(srv, "HOST_GID", "1000")
+        monkeypatch.setattr(srv.os, "geteuid", lambda: 1000)
+        assert srv._child_kwargs() == ({}, None)
+
+    def test_configured_root_runs_children_as_host_user_with_socket_group(self, monkeypatch, tmp_path):
+        self._configure(monkeypatch, tmp_path, socket_gid=123)
+        kwargs, error = srv._child_kwargs()
+        assert error is None
+        assert kwargs["user"] == 1000 and kwargs["group"] == 1000
+        assert kwargs["extra_groups"] == [123]
+        assert kwargs["env"]["HOME"] == "/home/cicd"
+        assert kwargs["env"]["USER"] == "cicd"
+
+    def test_socket_group_equal_to_host_gid_adds_no_extra_group(self, monkeypatch, tmp_path):
+        self._configure(monkeypatch, tmp_path, socket_gid=1000)
+        kwargs, _ = srv._child_kwargs()
+        assert kwargs["extra_groups"] == []
+
+    def test_missing_socket_adds_no_extra_group(self, monkeypatch, tmp_path):
+        self._configure(monkeypatch, tmp_path, socket_gid=None)
+        kwargs, _ = srv._child_kwargs()
+        assert kwargs["extra_groups"] == []
+
+    def test_account_setup_failure_refuses_run_command_instead_of_running_as_root(self, monkeypatch, projects_root):
+        monkeypatch.setattr(srv, "HOST_UID", "1000")
+        monkeypatch.setattr(srv, "HOST_GID", "1000")
+        monkeypatch.setattr(srv.os, "geteuid", lambda: 0)
+        monkeypatch.setattr(srv, "_ensure_host_user", lambda: "ERROR: cannot create an account for 1000:1000: boom")
+
+        def must_not_run(*a, **kw):
+            raise AssertionError("run_allowlisted called despite setup failure")
+        monkeypatch.setattr(srv, "run_allowlisted", must_not_run)
+        out = srv.run_command("SampleProject", "id", [])
+        assert out.startswith("ERROR: cannot create an account for 1000:1000")
+
+    def test_ensure_host_user_reports_groupadd_failure_and_retries_later(self, monkeypatch):
+        monkeypatch.setattr(srv, "HOST_UID", "4321")
+        monkeypatch.setattr(srv, "HOST_GID", "4321")
+        monkeypatch.setattr(srv, "_host_user_ready", None)
+
+        def missing(_id):
+            raise KeyError(_id)
+        monkeypatch.setattr(srv.grp, "getgrgid", missing)
+        monkeypatch.setattr(srv.pwd, "getpwuid", missing)
+
+        def failing_run(cmd, **kw):
+            raise srv.subprocess.CalledProcessError(9, cmd, stderr="groupadd: name 'cicd' is not unique")
+        monkeypatch.setattr(srv.subprocess, "run", failing_run)
+        error = srv._ensure_host_user()
+        assert error == "ERROR: cannot create an account for 4321:4321: groupadd: name 'cicd' is not unique"
+        assert srv._host_user_ready is None
+
+    def test_run_allowlisted_passes_child_kwargs_to_subprocess(self, monkeypatch, tmp_path):
+        from lib import common
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen.update(kw)
+            return common.subprocess.CompletedProcess(cmd, 0, "", "")
+        monkeypatch.setattr(common.subprocess, "run", fake_run)
+        common.run_allowlisted("id", [], {"id"}, tmp_path, 5, {"user": 1000, "group": 1000})
+        assert seen["user"] == 1000 and seen["group"] == 1000
+
+    @pytest.mark.skipif(not hasattr(__import__("os"), "geteuid") or __import__("os").geteuid() != 0,
+                        reason="switching uid needs root")
+    def test_run_allowlisted_really_runs_as_the_given_uid(self, tmp_path):
+        from lib import common
+        out = common.run_allowlisted("id", ["-u"], {"id"}, tmp_path, 10,
+                                     {"user": 65534, "group": 65534, "extra_groups": []})
+        assert "65534" in out
+
+    async def test_health_reports_children_uid(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(srv, "HOST_UID", "")
+        monkeypatch.setattr(srv, "HOST_GID", "")
+        monkeypatch.setattr(srv, "DOCKER_SOCKET_PATH", tmp_path / "missing.sock")
+        response = await srv.health_check(None)
+        body = json.loads(response.body)
+        assert body["children_uid"] == str(srv.os.geteuid())

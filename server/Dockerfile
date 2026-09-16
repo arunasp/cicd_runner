@@ -19,6 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Children of the server now run as HOST_UID (see _child_kwargs in
+# bash_mcp_server.py); this setting still covers the root fallback when
+# HOST_UID is unset.
 # Real bug found live 2026-08-08: this container runs as root by
 # default (no USER directive), so its own `git` invocations (e.g.
 # resolve_project_dir.sh's `git rev-parse --show-toplevel`, used by

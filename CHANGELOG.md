@@ -140,6 +140,11 @@ Changelog](https://keepachangelog.com/en/1.1.0/); versions come from
 
 ### Changed
 
+- Coordinator children (`run_command`, `container_control`, the worker
+  `docker run`) run as `HOST_UID`/`HOST_GID` plus the docker socket's
+  group, not as root. The account is created at startup if missing; a
+  failure refuses the call. `/health` reports `children_uid`, and the
+  coordinator's compose service sets `nproc` to 8192.
 - `examples/hello-rust` runs in a locally built worker image
   (`cicd-example-hello-rust`) instead of `rust:1.82-bookworm`, so its
   output is owned by the host user.

@@ -103,4 +103,10 @@ services:
       # only place DYNAMIC_ROOT gets set) fails loudly (empty phantom
       # mount) rather than silently resolving to something unintended.
       - ${DYNAMIC_ROOT:-/nonexistent-unless-configured}:/dynamic-root:ro
+    # Coordinator children run as HOST_UID. The kernel checks that uid's
+    # host-wide process count against RLIMIT_NPROC when they exec, and
+    # the daemon default can be as low as 128, so set it here as the
+    # worker's `docker run --ulimit` does.
+    ulimits:
+      nproc: 8192
     restart: unless-stopped

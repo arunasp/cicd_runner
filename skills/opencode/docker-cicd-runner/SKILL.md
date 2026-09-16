@@ -76,9 +76,11 @@ other fails.
 ## The privilege split
 
 **Coordinator** (`server/`) runs as **root** and holds the Docker socket. It
-performs the allowlist check and launches workers. Its
-`git config --global --add safe.directory '*'` exists precisely because root
-is operating on mounted projects owned by another uid.
+performs the allowlist check and launches workers. Every process it starts
+-- `run_command`, `container_control` and the worker `docker run` -- runs as
+`HOST_UID:HOST_GID` with the socket's group added, so nothing it writes to a
+bind mount is root-owned. With `HOST_UID`/`HOST_GID` unset, children run as
+root; `/health` reports which in `children_uid`.
 
 **Worker** (`worker/`) runs as the **host uid:gid**, via `docker run --user`
 plus an `entrypoint.sh` that creates a matching passwd/group entry and drops
@@ -229,9 +231,9 @@ Two things to get right when you do:
 - Capture the detached container's output into the project's own log
   directory before removing the container, or the record disappears with
   it.
-- A pipeline driven that way runs as root, so anything it writes to the
-  bind mount -- including its own log -- lands root-owned. Hand it back to
-  the host uid in the same step.
+- A pipeline driven that way runs as the host uid when `HOST_UID` is set;
+  check `children_uid` in `/health` before relying on it, and hand any
+  root-owned output back in the same step when it is not.
 
 ## Choosing the tool
 

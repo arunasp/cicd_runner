@@ -649,6 +649,17 @@ Docker) may not need this. Files already left root-owned from before
 this was in place need a manual `chown`; this only affects future
 worker runs.
 
+The coordinator process itself runs as root: it creates accounts and
+needs the docker socket. Every process it starts -- `run_command`,
+`container_control` and the worker `docker run` -- runs as
+`HOST_UID`/`HOST_GID` instead, with the socket's group added so docker
+still works. The account is created at startup if the image has none
+(`cicd`, home `/home/cicd`). If `HOST_UID`/`HOST_GID` are set but the
+account cannot be created, the call is refused rather than run as root.
+`/health` reports the uid children run as in `children_uid`, and the
+compose file sets `nproc` to 8192 for the same reason as the worker's
+`--ulimit`.
+
 ## Directory ACLs
 
 `DYNAMIC_ROOT` alone is a broad, all-or-nothing grant. `run_in_directory()`

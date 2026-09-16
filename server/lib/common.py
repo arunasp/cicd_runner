@@ -65,7 +65,11 @@ def run_allowlisted(
     allowed: Iterable[str],
     workdir: Path,
     timeout_seconds: int,
+    child_kwargs: dict | None = None,
 ) -> str:
+    """Run one allowlisted binary. `child_kwargs` is passed to
+    subprocess.run unchanged -- the coordinator uses it for user, group,
+    extra_groups and env so its children do not run as root."""
     if binary not in allowed:
         return f"REFUSED: '{binary}' is not in the allowlist {sorted(allowed)}"
 
@@ -77,6 +81,7 @@ def run_allowlisted(
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
+            **(child_kwargs or {}),
         )
     except subprocess.TimeoutExpired:
         return f"TIMEOUT: '{binary}' exceeded {timeout_seconds}s"

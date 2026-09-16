@@ -155,8 +155,10 @@ no self-rebuild, no chicken-and-egg.
 """
 
 import fnmatch
+import grp
 import json
 import os
+import pwd
 import re
 import subprocess
 import uuid
@@ -183,6 +185,10 @@ OPENCODE_CONFIG_FILENAME = "opencode.json"
 ALLOWED_DIRECTORIES_HEADER = "X-Allowed-Directories"
 TIMEOUT_SECONDS = int(os.environ.get("CICD_TIMEOUT_SECONDS", "300"))
 DOCKER_SOCKET_PATH = Path("/var/run/docker.sock")
+# Account created at runtime for HOST_UID/HOST_GID when the image has
+# none; its home directory becomes HOME for every child process.
+HOST_USER_NAME = "cicd"
+HOST_USER_HOME = "/home/cicd"
 
 ALLOWED_BINARIES_COORDINATOR = FileAllowlist(Path("/app/allowlist.txt"))
 ALLOWED_BINARIES_WORKER = FileAllowlist(Path("/app/allowlist-worker.txt"))
@@ -200,6 +206,70 @@ mcp = FastMCP(
     host="0.0.0.0",
     port=int(os.environ.get("MCP_PORT", "1444")),
 )
+
+
+_host_user_ready: str | None = None
+
+
+def _ensure_host_user() -> str | None:
+    """Create passwd/group entries for HOST_UID/HOST_GID if the image has
+    none, once per process. Returns an error message, or None."""
+    global _host_user_ready
+    if _host_user_ready == "ok":
+        return None
+    uid, gid = int(HOST_UID), int(HOST_GID)
+    try:
+        try:
+            grp.getgrgid(gid)
+        except KeyError:
+            subprocess.run(["groupadd", "--gid", str(gid), HOST_USER_NAME],
+                           check=True, capture_output=True, text=True)
+        try:
+            pwd.getpwuid(uid)
+        except KeyError:
+            subprocess.run(["useradd", "--uid", str(uid), "--gid", str(gid),
+                            "--home-dir", HOST_USER_HOME, "--create-home",
+                            "--shell", "/bin/sh", HOST_USER_NAME],
+                           check=True, capture_output=True, text=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        return f"ERROR: cannot create an account for {uid}:{gid}: {detail.strip()}"
+    _host_user_ready = "ok"
+    return None
+
+
+def _child_kwargs() -> tuple[dict, str | None]:
+    """subprocess keyword arguments that run a coordinator child as
+    HOST_UID:HOST_GID, with the docker socket's group added so docker
+    still works. Empty when HOST_UID/HOST_GID are not both set or this
+    process is not root. Returns (kwargs, error); on error the caller
+    refuses rather than falling back to root."""
+    if not HOST_UID or not HOST_GID or os.geteuid() != 0:
+        return {}, None
+    error = _ensure_host_user()
+    if error:
+        return {}, error
+    uid, gid = int(HOST_UID), int(HOST_GID)
+    extra_groups = []
+    try:
+        socket_gid = DOCKER_SOCKET_PATH.stat().st_gid
+        if socket_gid != gid:
+            extra_groups.append(socket_gid)
+    except FileNotFoundError:
+        pass
+    entry = pwd.getpwuid(uid)
+    env = dict(os.environ)
+    env.update(HOME=entry.pw_dir, USER=entry.pw_name, LOGNAME=entry.pw_name)
+    return {"user": uid, "group": gid, "extra_groups": extra_groups, "env": env}, None
+
+
+def _children_uid() -> str:
+    kwargs, error = _child_kwargs()
+    if error:
+        return "error"
+    if not kwargs:
+        return str(os.geteuid())
+    return str(kwargs["user"])
 
 
 @mcp.custom_route("/health", methods=["GET"])
@@ -245,6 +315,7 @@ async def health_check(request: Request) -> JSONResponse:
             "docker_socket": docker_socket_ok,
             "dynamic_root_configured": bool(DYNAMIC_ROOT_HOST),
             "cache_root_configured": bool(CACHE_ROOT_HOST),
+            "children_uid": _children_uid(),
         },
         status_code=200 if docker_socket_ok else 503,
     )
@@ -726,9 +797,12 @@ def _resolve_compose_binary() -> tuple[list[str] | None, str | None]:
     is precisely the case that made an earlier start.sh fail on a host
     carrying only v1.
     """
+    child, child_error = _child_kwargs()
+    if child_error:
+        return None, child_error
     try:
         probe = subprocess.run(["docker", "compose", "version"],
-                               capture_output=True, text=True, timeout=30)
+                               capture_output=True, text=True, timeout=30, **child)
         if probe.returncode == 0:
             return ["docker", "compose"], None
     except FileNotFoundError:
@@ -739,7 +813,7 @@ def _resolve_compose_binary() -> tuple[list[str] | None, str | None]:
 
     try:
         probe = subprocess.run(["docker-compose", "version"],
-                               capture_output=True, text=True, timeout=30)
+                               capture_output=True, text=True, timeout=30, **child)
         if probe.returncode == 0:
             return ["docker-compose"], None
     except FileNotFoundError:
@@ -784,7 +858,11 @@ def run_command(project: str, binary: str, args: list[str]) -> str:
     project_dir = _resolve_project_dir(project)
     if project_dir is None:
         return f"REFUSED: '{project}' is not a mounted project directory"
-    return run_allowlisted(binary, args, ALLOWED_BINARIES_COORDINATOR, project_dir, TIMEOUT_SECONDS)
+    child, child_error = _child_kwargs()
+    if child_error:
+        return child_error
+    return run_allowlisted(binary, args, ALLOWED_BINARIES_COORDINATOR, project_dir,
+                           TIMEOUT_SECONDS, child)
 
 
 @mcp.tool()
@@ -832,6 +910,9 @@ async def run_in_directory(relative_path: str, binary: str, args: list[str], ctx
     if image_error:
         return image_error
 
+    child, child_error = _child_kwargs()
+    if child_error:
+        return child_error
     try:
         result = subprocess.run(
             ["docker", "run", "--rm", "-v", f"{host_path}:/workspace",
@@ -841,6 +922,7 @@ async def run_in_directory(relative_path: str, binary: str, args: list[str], ctx
             capture_output=True,
             text=True,
             timeout=TIMEOUT_SECONDS,
+            **child,
         )
     except subprocess.TimeoutExpired:
         return f"TIMEOUT: worker run exceeded {TIMEOUT_SECONDS}s"
@@ -902,6 +984,9 @@ async def container_control(relative_path: str, action: str,
     # Run with cwd set to the compose directory so compose reads that
     # directory's own .env, and pass the file explicitly so the result
     # does not depend on compose's own directory search.
+    child, child_error = _child_kwargs()
+    if child_error:
+        return child_error
     steps = CONTAINER_ACTIONS[action]
     outputs = []
     for step in steps:
@@ -912,6 +997,7 @@ async def container_control(relative_path: str, action: str,
                 capture_output=True,
                 text=True,
                 timeout=TIMEOUT_SECONDS,
+                **child,
             )
         except subprocess.TimeoutExpired:
             return f"TIMEOUT: '{' '.join(step)}' exceeded {TIMEOUT_SECONDS}s"
