@@ -145,6 +145,12 @@ it's manually restarted.
 Day-to-day, `make start` / `make stop` / `make restart` cover
 relaunching without a full rebuild; `make build` rebuilds the Docker
 images first if the coordinator or worker source changed.
+If an image builds but cannot start a container (for example
+`missing parent` from the snapshotter), `make start` stops before
+touching the running container; `make rebuild` builds both images
+without cache and verifies them. When `compose rm -sf` fails on a
+container the daemon lists, `make start` removes this project's
+containers by ID (`make clean-containers`) before launching.
 
 ### Full verification (`tools/deploy_cicd_runner.sh`)
 
@@ -790,12 +796,15 @@ this exists so the regeneration itself doesn't strictly require one.
 
 ```bash
 make build            # ./build.sh          -- runner images only
+make rebuild          # --no-cache --pull build, then start one throwaway container per image
+make image-check      # ./build.sh verify   -- start one throwaway container per image
+make clean-containers # remove every container compose labels for this project, by ID
 make build-extension  # ./desktop-extension/build.sh
 make build-all        # both
 make deps             # tools/venv-build.sh -- provision/heal the test virtualenv
 make env-check        # tools/venv-check.sh -- is that virtualenv current? changes nothing
 make modes-check      # every directly-executed script is 100755 in the git index
-make start            # ./start.sh (builds runner, then launches)
+make start            # ./start.sh (builds runner, verifies images start, then launches)
 make stop / restart / logs / status
 make all              # build-all + start
 make push             # git push origin main -- see below for where this can actually run

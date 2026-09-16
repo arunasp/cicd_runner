@@ -16,7 +16,15 @@
 #                 compose unconditionally at the top, which made
 #                 `./build.sh worker` alone spuriously require compose
 #                 even though that stage never uses it.
-#   all         - both of the above, in order (default if no stage given)
+#   verify      - run each built image once (`--entrypoint true`). A build
+#                 can pass entirely from cache while the daemon cannot
+#                 unpack the result; only starting a container proves it.
+#   all         - worker, coordinator, in order (default). verify is
+#                 NOT part of it: `make all` builds and starts nothing.
+#                 start.sh and `make rebuild` name verify explicitly.
+#
+# BUILD_FLAGS is passed to both build stages, e.g.
+#   BUILD_FLAGS="--no-cache --pull" ./build.sh
 set -euo pipefail
 
 # `pwd -P` for the same reason start.sh uses it: this resolves the
@@ -27,6 +35,14 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "${script_dir}"
 
 declare -a FAILED_STAGES=()
+
+# Word-split on purpose: a flag list, not a path.
+read -r -a build_flags <<< "${BUILD_FLAGS:-}"
+
+# Image names as the build stages produce them: the worker tag below,
+# and `image:` in docker-compose.yml for the coordinator.
+WORKER_IMAGE_NAME="cicd-worker"
+COORDINATOR_IMAGE_NAME="cicd-runner"
 
 run_stage() {
     local name="$1"
@@ -46,7 +62,7 @@ stage_worker() {
         echo "  (docker not found on PATH -- cannot build anything)" >&2
         return 1
     fi
-    docker build -t cicd-worker ./worker
+    docker build "${build_flags[@]}" -t "${WORKER_IMAGE_NAME}" ./worker
 }
 
 stage_coordinator() {
@@ -55,7 +71,23 @@ stage_coordinator() {
     # (configure.ac and start.sh had the others), which is exactly the
     # drift this project already refused to accept between start.sh and
     # build.sh's own build steps.
-    "${script_dir}/tools/compose.sh" build
+    "${script_dir}/tools/compose.sh" build "${build_flags[@]}"
+}
+
+stage_verify() {
+    local image rc=0
+    for image in "${WORKER_IMAGE_NAME}" "${COORDINATOR_IMAGE_NAME}"; do
+        if docker run --rm --network none --entrypoint true "${image}"; then
+            echo "  ${image}: starts" >&2
+        else
+            echo "  ${image}: cannot start a container from this image" >&2
+            rc=1
+        fi
+    done
+    if [[ "${rc}" -ne 0 ]]; then
+        echo "  rebuild without cache: make rebuild" >&2
+    fi
+    return "${rc}"
 }
 
 stages=("${@:-all}")
@@ -67,9 +99,10 @@ for stage in "${stages[@]}"; do
     case "${stage}" in
         worker)      run_stage worker stage_worker ;;
         coordinator) run_stage coordinator stage_coordinator ;;
+        verify)      run_stage verify stage_verify ;;
         *)
             echo "error: unknown stage '${stage}'" >&2
-            echo "Usage: $0 [worker|coordinator|all]" >&2
+            echo "Usage: $0 [worker|coordinator|verify|all]" >&2
             exit 1
             ;;
     esac

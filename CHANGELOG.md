@@ -8,6 +8,12 @@ Changelog](https://keepachangelog.com/en/1.1.0/); versions come from
 
 ### Added
 
+- `build.sh verify` stage: starts one throwaway container per image with
+  `--entrypoint true --network none`. Not part of the default stage list.
+- `BUILD_FLAGS` environment variable, passed to both build stages.
+- `make rebuild` (`--no-cache --pull`, then `verify`) and `make image-check`.
+- `tools/clean-containers.sh` and `make clean-containers`: remove every
+  container labelled for this compose project, by ID.
 - `container_control(relative_path, action)` — brings a project's own
   compose stack up, down or back with a rebuild. Takes the directory
   containing the compose file and one of six action names; the coordinator
@@ -125,6 +131,12 @@ Changelog](https://keepachangelog.com/en/1.1.0/); versions come from
 
 ### Changed
 
+- `start.sh` runs `verify` after building and exits before `compose rm`
+  when an image cannot start.
+- `start.sh` falls back to `tools/clean-containers.sh` when
+  `compose rm -sf` fails, and exits before launching if containers remain.
+- `make clean` no longer descends into `.cicd-runner-cache/`, `.venv/` or
+  `.git/`.
 - The venv tools are named `tools/venv-check.sh` and `tools/venv-build.sh`.
   They were briefly `envcheck.sh` and `pyenv.sh`; the second collides
   with `pyenv`, a widely used and entirely different tool, and these

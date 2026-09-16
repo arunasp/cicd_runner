@@ -28,7 +28,7 @@ fi
 # extension isn't needed to launch the service, and build.sh already
 # SKIPs (not fails) that stage if node/npm/npx aren't present anyway.
 echo "Building..." >&2
-./build.sh worker coordinator
+./build.sh worker coordinator verify
 
 # Computed fresh from the actual launching user every time, not
 # stored in .env -- avoids staleness if this is ever run by a
@@ -89,6 +89,13 @@ compose() { "${script_dir}/tools/compose.sh" "$@"; }
 # docker-compose v1 KeyError: 'ContainerConfig' recreate bug as
 # LocusAI's own start.sh guards against.
 echo "Removing any stale container..." >&2
-compose rm -sf
+if ! compose rm -sf; then
+    echo "compose rm failed; removing this project's containers by ID..." >&2
+    if ! "${script_dir}/tools/clean-containers.sh"; then
+        echo "error: the daemon still lists containers it will not remove." >&2
+        echo "They need removing on the host before this project can start." >&2
+        exit 1
+    fi
+fi
 echo "Launching..." >&2
 compose up -d

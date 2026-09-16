@@ -29,7 +29,7 @@ dist_pkgdata_SCRIPTS = build.sh start.sh
 # checkout working. The deploy_* and debug scripts are deliberately not
 # listed at all, exactly as before the move: they were never installed
 # or distributed, and this is a relocation, not a change of what ships.
-nobase_dist_pkgdata_SCRIPTS = tools/compose.sh tools/venv-build.sh tools/venv-check.sh tools/shellcheck.sh
+nobase_dist_pkgdata_SCRIPTS = tools/compose.sh tools/venv-build.sh tools/venv-check.sh tools/shellcheck.sh tools/clean-containers.sh
 dist_pkgdata_DATA = docker-compose.yml .env.example README.md
 
 # `make` / `make all` -- delegates to build.sh (worker + coordinator
@@ -110,12 +110,15 @@ COMPOSE = $(SHELL) $(srcdir)/tools/compose.sh
 # for THIS specific failure (though still generally sound practice
 # after any Makefile.am/configure.ac edit).
 
-.PHONY: help build build-extension build-all start stop restart logs status health-check push skills-check deps env-check modes-check
+.PHONY: help build rebuild image-check clean-containers build-extension build-all start stop restart logs status health-check push skills-check deps env-check modes-check
 
 help:
 	@echo "Autotools-standard targets: check install uninstall dist clean"
 	@echo "This project's own daily-use targets:"
 	@echo "  build           - build cicd-runner's own images (worker + coordinator)"
+	@echo "  rebuild         - build both images with --no-cache --pull, then verify they start"
+	@echo "  image-check     - start one throwaway container per image; changes nothing else"
+	@echo "  clean-containers - remove every container compose labels for this project, by ID"
 	@echo "  deps            - provision (and heal) the Python env 'make check' runs in"
 	@echo "  env-check       - report whether that env is current; changes nothing"
 	@echo "  modes-check     - prove every directly-executed script is 100755 in the index"
@@ -131,6 +134,22 @@ help:
 
 build:
 	./build.sh
+
+# `make rebuild` -- the recovery path when an image builds but cannot be
+# started: `build` can pass entirely from cache while the daemon cannot
+# unpack the layers it reuses. --pull refreshes the base image as well.
+rebuild:
+	BUILD_FLAGS="--no-cache --pull" ./build.sh worker coordinator verify
+
+# `make image-check` -- the verify stage alone. Starts and removes one
+# container per image with `--entrypoint true` and `--network none`.
+image-check:
+	./build.sh verify
+
+# `make clean-containers` -- the same fallback start.sh uses when
+# `compose rm -sf` fails on a container the daemon lists.
+clean-containers:
+	$(SHELL) $(srcdir)/tools/clean-containers.sh
 
 build-extension:
 	./desktop-extension/build.sh
@@ -267,6 +286,7 @@ deps: ## Provision the Python environment make check runs in
 # a silent misinstall.
 EXEC_BITS = autogen.sh build.sh start.sh \
 	tools/compose.sh tools/venv-build.sh tools/venv-check.sh tools/shellcheck.sh \
+	tools/clean-containers.sh \
 	tools/debug_worker.sh \
 	tools/deploy_cicd_runner.sh tools/deploy_cicd_runner_debug.sh \
 	desktop-extension/build.sh
@@ -314,7 +334,8 @@ check-local: skills-check modes-check deps
 	@echo "Running shellcheck..."
 	@$(SHELL) $(srcdir)/tools/shellcheck.sh -x -P SCRIPTDIR \
 		build.sh start.sh tools/compose.sh tools/venv-build.sh \
-		tools/venv-check.sh tools/shellcheck.sh desktop-extension/build.sh
+		tools/venv-check.sh tools/shellcheck.sh tools/clean-containers.sh \
+		desktop-extension/build.sh
 
 # Skills are published in two formats from one source of truth: the
 # browsable skills/opencode/<name>/ trees, and the packaged
@@ -411,9 +432,13 @@ uninstall-local:
 # already-built Docker images -- `docker rmi` has broader
 # consequences than a normal `make clean` should carry, and isn't
 # something to do silently as a side effect of this target.
+# The dependency caches are skipped: .cicd-runner-cache/ and .venv/ hold
+# installed packages, not build output, and may carry files another uid
+# wrote (the coordinator runs as root).
 clean-local: clean-example-artifacts
 	rm -rf desktop-extension/node_modules desktop-extension/dist/*.mcpb
-	find . \( -name __pycache__ -o -name .pytest_cache \) -exec rm -rf {} +
+	find . \( -path ./.cicd-runner-cache -o -path ./.venv -o -path ./.git \) -prune \
+		-o \( -name __pycache__ -o -name .pytest_cache \) -type d -exec rm -rf {} +
 
 # `make dist` -- dist_pkgdata_SCRIPTS/DATA above are bundled
 # automatically; EXTRA_DIST covers everything else needed to
