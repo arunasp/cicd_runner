@@ -4,8 +4,13 @@
 # Split into greet.c (library function) + main.c (entry point) so
 # test.c can link against greet.c without a duplicate-main conflict
 # -- the standard way to make C code testable at all.
+# The worker image carries /etc/cicd-common.mk; inside this checkout
+# ../cicd-common.mk is used instead. Loading both redefines `help`.
+ifeq ($(wildcard /etc/cicd-common.mk),)
 -include ../cicd-common.mk
--include /etc/cicd-common.mk
+else
+include /etc/cicd-common.mk
+endif
 
 CC ?= gcc
 CFLAGS ?= -Wall -Wextra -Wpedantic -std=c11

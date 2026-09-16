@@ -278,8 +278,9 @@ deps: ## Provision the Python environment make check runs in
 # executable in the INDEX rather than merely in someone's working tree.
 # Deliberately an explicit list rather than a glob over *.sh: it is not
 # true of every script here. worker/entrypoint.sh is 100644 on purpose
-# (its Dockerfile chmods it after COPY), and examples/hello-bash/*.sh
-# are invoked through make, never as commands.
+# (its Dockerfile chmods it after COPY), and examples/hello-bash/test.sh
+# is run through `bash`. examples/hello-bash/hello.sh is listed: its
+# test and verify targets run it as a command.
 #
 # The gate exists because losing the bit is silent and easy: an editor
 # or a connector that rewrites a file in place can drop it, git records
@@ -293,6 +294,7 @@ deps: ## Provision the Python environment make check runs in
 EXEC_BITS = autogen.sh build.sh start.sh \
 	tools/compose.sh tools/venv-build.sh tools/venv-check.sh tools/shellcheck.sh \
 	tools/clean-containers.sh tools/autotools.sh \
+	examples/hello-bash/hello.sh \
 	tools/debug_worker.sh \
 	tools/deploy_cicd_runner.sh tools/deploy_cicd_runner_debug.sh \
 	desktop-extension/build.sh

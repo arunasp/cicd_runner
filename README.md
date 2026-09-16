@@ -151,6 +151,9 @@ touching the running container; `make rebuild` builds both images
 without cache and verifies them. When `compose rm -sf` fails on a
 container the daemon lists, `make start` removes this project's
 containers by ID (`make clean-containers`) before launching.
+`make start` then waits up to 60 seconds for `/health`
+(`CICD_HEALTH_TIMEOUT`, `CICD_HEALTH_URL`) and prints the coordinator's
+log if it does not answer.
 
 ### Full verification (`tools/deploy_cicd_runner.sh`)
 

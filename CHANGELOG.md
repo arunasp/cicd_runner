@@ -140,6 +140,14 @@ Changelog](https://keepachangelog.com/en/1.1.0/); versions come from
 
 ### Changed
 
+- `start.sh` waits for `/health` after `compose up -d` (60 s by default,
+  `CICD_HEALTH_TIMEOUT`) and prints the coordinator's log on failure.
+- Example Makefiles include `/etc/cicd-common.mk` when present and
+  `../cicd-common.mk` otherwise, instead of both, which redefined `help`.
+- `examples/hello-bash`: `make test` runs `bash ./test.sh`; the script is
+  not executable in git, so a fresh checkout failed with permission denied.
+- `examples/hello-bash/hello.sh` is `100755` in git and checked by
+  `make modes-check`; its `build` target no longer leaves the tree modified.
 - Coordinator children (`run_command`, `container_control`, the worker
   `docker run`) run as `HOST_UID`/`HOST_GID` plus the docker socket's
   group, not as root. The account is created at startup if missing; a

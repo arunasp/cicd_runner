@@ -6,8 +6,13 @@
 # directory points run_in_directory() at rust:1.82-bookworm instead
 # of the default cicd-worker image, which has no Rust toolchain at
 # all and never will.
+# The worker image carries /etc/cicd-common.mk; inside this checkout
+# ../cicd-common.mk is used instead. Loading both redefines `help`.
+ifeq ($(wildcard /etc/cicd-common.mk),)
 -include ../cicd-common.mk
--include /etc/cicd-common.mk
+else
+include /etc/cicd-common.mk
+endif
 
 CARGO ?= cargo
 PREFIX ?= /usr/local

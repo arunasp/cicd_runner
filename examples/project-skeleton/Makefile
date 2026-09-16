@@ -20,8 +20,13 @@
 # ../cicd-common.mk line is only useful while this file still lives
 # inside cicd_runner's own examples/ directory, and is a harmless
 # no-op once copied elsewhere.
+# The worker image carries /etc/cicd-common.mk; inside this checkout
+# ../cicd-common.mk is used instead. Loading both redefines `help`.
+ifeq ($(wildcard /etc/cicd-common.mk),)
 -include ../cicd-common.mk
--include /etc/cicd-common.mk
+else
+include /etc/cicd-common.mk
+endif
 
 .PHONY: lint test build deploy verify e2e all
 

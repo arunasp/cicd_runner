@@ -99,3 +99,25 @@ if ! compose rm -sf; then
 fi
 echo "Launching..." >&2
 compose up -d
+
+# `compose up -d` returns when the container starts, before the server
+# listens. Wait for /health so the caller gets a usable service or an
+# error with the coordinator's log.
+health_url="${CICD_HEALTH_URL:-http://127.0.0.1:1444/health}"
+health_timeout="${CICD_HEALTH_TIMEOUT:-60}"
+if ! command -v curl >/dev/null 2>&1; then
+    echo "curl not found -- not waiting for ${health_url}" >&2
+    exit 0
+fi
+echo "Waiting up to ${health_timeout}s for ${health_url}..." >&2
+waited=0
+until curl -fsS -m 3 "${health_url}" >/dev/null 2>&1; do
+    if [[ "${waited}" -ge "${health_timeout}" ]]; then
+        echo "error: ${health_url} did not answer within ${health_timeout}s" >&2
+        compose logs --tail 30 >&2 || true
+        exit 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+done
+echo "Healthy: $(curl -fsS -m 3 "${health_url}")" >&2

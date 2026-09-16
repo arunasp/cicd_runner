@@ -1,8 +1,13 @@
 # Real, filled-in "hello world" example -- not a stub. Demonstrates
 # the standard lint/test/build/deploy/verify/e2e/all target
 # vocabulary (see ../project-skeleton/) with real bash tooling.
+# The worker image carries /etc/cicd-common.mk; inside this checkout
+# ../cicd-common.mk is used instead. Loading both redefines `help`.
+ifeq ($(wildcard /etc/cicd-common.mk),)
 -include ../cicd-common.mk
--include /etc/cicd-common.mk
+else
+include /etc/cicd-common.mk
+endif
 
 .PHONY: lint test build deploy verify e2e all
 
@@ -17,7 +22,7 @@ build: ## Syntax-check and mark executable
 	chmod +x hello.sh
 
 test: build ## Unit tests
-	./test.sh
+	bash ./test.sh
 
 deploy: build ## Nothing to deploy -- a standalone script has no service
 	@echo "Nothing to deploy -- a standalone script has no running service."
