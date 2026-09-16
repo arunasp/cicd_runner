@@ -767,6 +767,19 @@ aren't committed — `autogen.sh` regenerates them from `configure.ac`/
 `Makefile.am` on a fresh checkout; a release tarball (`make dist`)
 already includes them.
 
+The checkout is shared between userlands with different Automake
+releases. When `make` regenerates its own files, `tools/autotools.sh`
+compares the Automake release recorded in `aclocal.m4` with the
+installed one and runs `autoreconf --install --force` when they
+differ; `make` then reruns `configure` and continues.
+
+`configure` warns, and does not fail, when `docker` or compose is
+absent. A worker has no docker by design and still configures,
+regenerates and runs `make check`. Docker targets (`build`, `rebuild`,
+`image-check`, `start`, `stop`, `status`, `logs`) run through the
+coordinator (`run_command`) or on the host, and report that when
+started in a userland without docker.
+
 **Releases are automatic, not a manual step.** CI (`.github/workflows/
 ci.yml`'s `tag-release` job) watches `configure.ac`'s own `AC_INIT`
 version on every push to `main`: once the other jobs pass and that

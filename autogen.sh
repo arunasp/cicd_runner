@@ -13,6 +13,8 @@ if ! command -v autoreconf &>/dev/null; then
     exit 1
 fi
 
-echo "Running autoreconf --install..." >&2
-autoreconf --install
+# --force: aclocal.m4 and the helper scripts may come from another
+# userland's Automake release.
+echo "Running autoreconf --install --force..." >&2
+autoreconf --install --force
 echo "Done. Next: ./configure && make && make check" >&2

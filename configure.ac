@@ -53,21 +53,25 @@ dnl file behind while reporting success. Unversioned means each userland
 dnl uses the automake it has, and a genuine incompatibility is reported
 dnl by automake itself rather than silently skipped.
 MISSING='${SHELL} missing'
-ACLOCAL='${SHELL} missing --run aclocal'
-AUTOCONF='${SHELL} missing --run autoconf'
-AUTOMAKE='${SHELL} missing --run automake'
-AUTOHEADER='${SHELL} missing --run autoheader'
+dnl The four regeneration programs go through tools/autotools.sh, which
+dnl reruns autoreconf when aclocal.m4 is from a different Automake
+dnl release than the installed one.
+ACLOCAL='${SHELL} tools/autotools.sh aclocal'
+AUTOCONF='${SHELL} tools/autotools.sh autoconf'
+AUTOMAKE='${SHELL} tools/autotools.sh automake'
+AUTOHEADER='${SHELL} tools/autotools.sh autoheader'
 MAKEINFO='${SHELL} missing --run makeinfo'
 export MISSING ACLOCAL AUTOCONF AUTOMAKE AUTOHEADER MAKEINFO
 
 AM_INIT_AUTOMAKE([foreign -Wall -Werror])
 
-dnl docker itself is not optional -- real docker-socket access is
-dnl this whole project's reason to exist (see README's "Why this
-dnl exists"). No point generating a Makefile that can't build anything.
+dnl docker is checked, not required. The worker has no docker by design
+dnl and still configures, regenerates and runs `make check`; docker work
+dnl runs in the coordinator (run_command) or on the host. build.sh and
+dnl tools/compose.sh check for docker when a target needs it.
 AC_CHECK_PROG([DOCKER], [docker], [docker], [])
 AS_IF([test -z "$DOCKER"],
-      [AC_MSG_ERROR([docker is required but was not found -- see README.md])])
+      [AC_MSG_WARN([docker not found -- docker targets (build, start, image-check) must run through the coordinator or on the host])])
 
 dnl docker compose (v2 plugin) or docker-compose (v1 binary) -- checked
 dnl here only so a userland with NEITHER fails at configure time rather
@@ -83,14 +87,12 @@ dnl 2026-08-25 -- see compose.sh's own header). compose.sh detects at
 dnl invocation instead, and build.sh, start.sh and the Makefile all
 dnl route through it.
 AC_MSG_CHECKING([for docker compose (v2 plugin)])
-AS_IF(["$DOCKER" compose version >/dev/null 2>&1],
+AS_IF([test -n "$DOCKER" && "$DOCKER" compose version >/dev/null 2>&1],
       [have_compose_v2=yes], [have_compose_v2=no])
 AC_MSG_RESULT([$have_compose_v2])
 AC_CHECK_PROG([DOCKER_COMPOSE_V1], [docker-compose], [docker-compose], [])
-AS_IF([test "x$have_compose_v2" = xno], [
-  AS_IF([test -z "$DOCKER_COMPOSE_V1"],
-        [AC_MSG_ERROR([neither 'docker compose' (v2) nor 'docker-compose' (v1) found])])
-])
+AS_IF([test -n "$DOCKER" && test "x$have_compose_v2" = xno && test -z "$DOCKER_COMPOSE_V1"],
+      [AC_MSG_WARN([neither 'docker compose' (v2) nor 'docker-compose' (v1) found -- compose targets will fail in this userland])])
 
 dnl Substituting the compose command was REMOVED 2026-08-25. It was
 dnl done here once at configure time, which is cheaper and looked

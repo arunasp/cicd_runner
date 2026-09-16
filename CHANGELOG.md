@@ -8,6 +8,10 @@ Changelog](https://keepachangelog.com/en/1.1.0/); versions come from
 
 ### Added
 
+- `tools/autotools.sh`: the Makefile's regeneration rules run `aclocal`,
+  `autoconf`, `automake` and `autoheader` through it, and it runs
+  `autoreconf --install --force` when `aclocal.m4` comes from a different
+  Automake release than the installed one.
 - `build.sh verify` stage: starts one throwaway container per image with
   `--entrypoint true --network none`. Not part of the default stage list.
 - `BUILD_FLAGS` environment variable, passed to both build stages.
@@ -131,6 +135,15 @@ Changelog](https://keepachangelog.com/en/1.1.0/); versions come from
 
 ### Changed
 
+- `build.sh` builds the worker image with `WORKER_UID`/`WORKER_GID` set to
+  the host user: `HOST_UID`/`HOST_GID`, then `SUDO_UID`/`SUDO_GID`, then
+  `id -u`/`id -g`. The worker Dockerfile creates that group and user only
+  when absent. `worker/entrypoint.sh` also accepts `TARGET_UID`/`TARGET_GID`.
+- `configure` warns instead of failing when `docker` or compose is absent,
+  so a worker can configure and run `make check`. `build.sh` and
+  `tools/compose.sh` name the coordinator or the host when docker is
+  missing at invocation.
+- `autogen.sh` runs `autoreconf --install --force`.
 - `start.sh` runs `verify` after building and exits before `compose rm`
   when an image cannot start.
 - `start.sh` falls back to `tools/clean-containers.sh` when

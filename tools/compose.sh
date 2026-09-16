@@ -30,4 +30,5 @@ elif command -v docker-compose >/dev/null 2>&1; then
 fi
 
 echo "error: neither 'docker compose' (v2) nor 'docker-compose' (v1) found" >&2
+echo "run compose targets through the coordinator (run_command) or on the host" >&2
 exit 127

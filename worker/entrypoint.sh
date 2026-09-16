@@ -46,10 +46,15 @@
 # same setpriv invocation.
 set -e
 
+# The runner sends WORKER_UID/WORKER_GID; a container following the
+# docker-run-as-host-user convention sends TARGET_UID/TARGET_GID.
+WORKER_UID="${WORKER_UID:-${TARGET_UID:-}}"
+WORKER_GID="${WORKER_GID:-${TARGET_GID:-}}"
+
 if [ -n "${WORKER_UID:-}" ] && [ -n "${WORKER_GID:-}" ]; then
     if ! getent passwd "${WORKER_UID}" >/dev/null 2>&1; then
         if ! getent group "${WORKER_GID}" >/dev/null 2>&1; then
-            addgroup --gid "${WORKER_GID}" worker
+            addgroup --gid "${WORKER_GID}" worker >/dev/null 2>&1
         fi
         adduser --uid "${WORKER_UID}" --gid "${WORKER_GID}" --home /home/worker \
             --shell /bin/sh --disabled-password --gecos "" worker >/dev/null 2>&1

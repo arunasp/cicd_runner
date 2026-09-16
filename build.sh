@@ -57,12 +57,29 @@ run_stage() {
     return 0
 }
 
-stage_worker() {
+# Docker stages belong to the coordinator (run_command) or the host;
+# a worker has no docker by design.
+require_docker() {
     if ! command -v docker &>/dev/null; then
-        echo "  (docker not found on PATH -- cannot build anything)" >&2
+        echo "  (docker not found on PATH -- run this stage through the coordinator (run_command) or on the host)" >&2
         return 1
     fi
-    docker build "${build_flags[@]}" -t "${WORKER_IMAGE_NAME}" ./worker
+}
+
+# The worker image bakes its runtime user at build time. The coordinator
+# builds as root with HOST_UID/HOST_GID set; `sudo` sets SUDO_UID/SUDO_GID;
+# otherwise the invoking user is the host user.
+stage_worker() {
+    require_docker || return 1
+    local uid gid uid_args=()
+    uid="${HOST_UID:-${SUDO_UID:-$(id -u 2>/dev/null || echo 0)}}"
+    gid="${HOST_GID:-${SUDO_GID:-$(id -g 2>/dev/null || echo 0)}}"
+    if [[ "${uid}" != 0 ]]; then
+        uid_args=(--build-arg "WORKER_UID=${uid}" --build-arg "WORKER_GID=${gid}")
+    else
+        echo "  (worker user: building as root with no HOST_UID or SUDO_UID -- keeping the image default)" >&2
+    fi
+    docker build "${build_flags[@]}" "${uid_args[@]}" -t "${WORKER_IMAGE_NAME}" ./worker
 }
 
 stage_coordinator() {
@@ -76,6 +93,7 @@ stage_coordinator() {
 
 stage_verify() {
     local image rc=0
+    require_docker || return 1
     for image in "${WORKER_IMAGE_NAME}" "${COORDINATOR_IMAGE_NAME}"; do
         if docker run --rm --network none --entrypoint true "${image}"; then
             echo "  ${image}: starts" >&2

@@ -29,7 +29,7 @@ dist_pkgdata_SCRIPTS = build.sh start.sh
 # checkout working. The deploy_* and debug scripts are deliberately not
 # listed at all, exactly as before the move: they were never installed
 # or distributed, and this is a relocation, not a change of what ships.
-nobase_dist_pkgdata_SCRIPTS = tools/compose.sh tools/venv-build.sh tools/venv-check.sh tools/shellcheck.sh tools/clean-containers.sh
+nobase_dist_pkgdata_SCRIPTS = tools/compose.sh tools/venv-build.sh tools/venv-check.sh tools/shellcheck.sh tools/clean-containers.sh tools/autotools.sh
 dist_pkgdata_DATA = docker-compose.yml .env.example README.md
 
 # `make` / `make all` -- delegates to build.sh (worker + coordinator
@@ -286,7 +286,7 @@ deps: ## Provision the Python environment make check runs in
 # a silent misinstall.
 EXEC_BITS = autogen.sh build.sh start.sh \
 	tools/compose.sh tools/venv-build.sh tools/venv-check.sh tools/shellcheck.sh \
-	tools/clean-containers.sh \
+	tools/clean-containers.sh tools/autotools.sh \
 	tools/debug_worker.sh \
 	tools/deploy_cicd_runner.sh tools/deploy_cicd_runner_debug.sh \
 	desktop-extension/build.sh
@@ -335,7 +335,7 @@ check-local: skills-check modes-check deps
 	@$(SHELL) $(srcdir)/tools/shellcheck.sh -x -P SCRIPTDIR \
 		build.sh start.sh tools/compose.sh tools/venv-build.sh \
 		tools/venv-check.sh tools/shellcheck.sh tools/clean-containers.sh \
-		desktop-extension/build.sh
+		tools/autotools.sh autogen.sh desktop-extension/build.sh
 
 # Skills are published in two formats from one source of truth: the
 # browsable skills/opencode/<name>/ trees, and the packaged

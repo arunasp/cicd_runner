@@ -118,9 +118,12 @@ COPY cicd-common.mk /etc/cicd-common.mk
 # entrypoint.sh changes needed for this to take effect.
 ARG WORKER_UID=1000
 ARG WORKER_GID=1000
-RUN groupadd --gid "${WORKER_GID}" worker \
-    && useradd --uid "${WORKER_UID}" --gid "${WORKER_GID}" --home-dir /home/worker \
-        --create-home --shell /bin/sh worker
+# build.sh passes the invoking host user's uid:gid. Either may already
+# exist in the base image (gid 100 is `users` in Debian), so each is
+# created only when absent.
+RUN (getent group "${WORKER_GID}" >/dev/null || groupadd --gid "${WORKER_GID}" worker) \
+    && (getent passwd "${WORKER_UID}" >/dev/null || useradd --uid "${WORKER_UID}" \
+        --gid "${WORKER_GID}" --home-dir /home/worker --create-home --shell /bin/sh worker)
 
 # entrypoint.sh (added 2026-08-09) -- see its own header comment for
 # the real, live-confirmed bug this fixes (WORKER_UID/WORKER_GID with
