@@ -8,6 +8,11 @@ Changelog](https://keepachangelog.com/en/1.1.0/); versions come from
 
 ### Added
 
+- `make build-examples` / `build.sh examples`: builds each
+  `examples/*/Dockerfile` as `cicd-example-NAME` with the host uid, then
+  starts it once.
+- `WORKER_PRESERVE_ENV`: variables an image names are kept across the
+  entrypoint's privilege drop.
 - `tools/autotools.sh`: the Makefile's regeneration rules run `aclocal`,
   `autoconf`, `automake` and `autoheader` through it, and it runs
   `autoreconf --install --force` when `aclocal.m4` comes from a different
@@ -135,6 +140,9 @@ Changelog](https://keepachangelog.com/en/1.1.0/); versions come from
 
 ### Changed
 
+- `examples/hello-rust` runs in a locally built worker image
+  (`cicd-example-hello-rust`) instead of `rust:1.82-bookworm`, so its
+  output is owned by the host user.
 - `build.sh` builds the worker image with `WORKER_UID`/`WORKER_GID` set to
   the host user: `HOST_UID`/`HOST_GID`, then `SUDO_UID`/`SUDO_GID`, then
   `id -u`/`id -g`. The worker Dockerfile creates that group and user only

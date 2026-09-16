@@ -547,6 +547,17 @@ one already has:
    the cache mounts stay mounted with nothing looking at them.
 4. `/etc/cicd-common.mk`, if the project's Makefile includes it.
 
+A base whose toolchain lives outside the default `PATH` also loses it to
+`--reset-env`. `worker/entrypoint.sh` keeps any variables the image
+lists in `WORKER_PRESERVE_ENV`, e.g. `ENV WORKER_PRESERVE_ENV="PATH
+RUSTUP_HOME"`.
+
+`examples/hello-rust` is a worked example: its `Dockerfile` builds on
+`rust:1.82-bookworm`, copies the entrypoint and `/etc/cicd-common.mk`
+from `cicd-worker`, and its `.cicd-image` names the local result,
+`cicd-example-hello-rust`. `make build-examples` builds every
+`examples/*/Dockerfile` that way, with the same host uid as the worker.
+
 Build it locally rather than pulling it. The coordinator holds the
 docker socket and mounts the dynamic root read-only, so it can build
 from any directory under it — the image never leaves the host, which

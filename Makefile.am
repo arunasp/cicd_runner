@@ -110,7 +110,7 @@ COMPOSE = $(SHELL) $(srcdir)/tools/compose.sh
 # for THIS specific failure (though still generally sound practice
 # after any Makefile.am/configure.ac edit).
 
-.PHONY: help build rebuild image-check clean-containers build-extension build-all start stop restart logs status health-check push skills-check deps env-check modes-check
+.PHONY: help build rebuild image-check build-examples clean-containers build-extension build-all start stop restart logs status health-check push skills-check deps env-check modes-check
 
 help:
 	@echo "Autotools-standard targets: check install uninstall dist clean"
@@ -119,6 +119,7 @@ help:
 	@echo "  rebuild         - build both images with --no-cache --pull, then verify they start"
 	@echo "  image-check     - start one throwaway container per image; changes nothing else"
 	@echo "  clean-containers - remove every container compose labels for this project, by ID"
+	@echo "  build-examples  - build the example worker images (examples/*/Dockerfile)"
 	@echo "  deps            - provision (and heal) the Python env 'make check' runs in"
 	@echo "  env-check       - report whether that env is current; changes nothing"
 	@echo "  modes-check     - prove every directly-executed script is 100755 in the index"
@@ -145,6 +146,11 @@ rebuild:
 # container per image with `--entrypoint true` and `--network none`.
 image-check:
 	./build.sh verify
+
+# `make build-examples` -- the example worker images, e.g. the one
+# examples/hello-rust/.cicd-image names. Needs the cicd-worker image.
+build-examples:
+	./build.sh worker examples
 
 # `make clean-containers` -- the same fallback start.sh uses when
 # `compose rm -sf` fails on a container the daemon lists.

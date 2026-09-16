@@ -68,6 +68,17 @@ if [ -n "${WORKER_UID:-}" ] && [ -n "${WORKER_GID:-}" ]; then
     [ -n "${NPM_CONFIG_CACHE:-}" ] && preserve_args="${preserve_args} NPM_CONFIG_CACHE=${NPM_CONFIG_CACHE}"
     [ -n "${CARGO_HOME:-}" ] && preserve_args="${preserve_args} CARGO_HOME=${CARGO_HOME}"
     [ -n "${PIP_CACHE_DIR:-}" ] && preserve_args="${preserve_args} PIP_CACHE_DIR=${PIP_CACHE_DIR}"
+    # An image built FROM a toolchain base names the further variables its
+    # toolchain needs, e.g. ENV WORKER_PRESERVE_ENV="PATH RUSTUP_HOME".
+    # Names that are not valid shell identifiers are skipped. Values are
+    # passed as single words, so they must not contain whitespace.
+    for name in ${WORKER_PRESERVE_ENV:-}; do
+        case "${name}" in
+            ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;;
+        esac
+        eval "value=\${${name}:-}"
+        [ -n "${value}" ] && preserve_args="${preserve_args} ${name}=${value}"
+    done
 
     # Intentional word-splitting below: each preserved var is one
     # controlled "KEY=VALUE" argument, values are always fixed,

@@ -19,6 +19,8 @@
 #   verify      - run each built image once (`--entrypoint true`). A build
 #                 can pass entirely from cache while the daemon cannot
 #                 unpack the result; only starting a container proves it.
+#   examples    - build each examples/*/Dockerfile as cicd-example-NAME
+#                 and start it once. Needs the cicd-worker image.
 #   all         - worker, coordinator, in order (default). verify is
 #                 NOT part of it: `make all` builds and starts nothing.
 #                 start.sh and `make rebuild` name verify explicitly.
@@ -66,20 +68,50 @@ require_docker() {
     fi
 }
 
-# The worker image bakes its runtime user at build time. The coordinator
+# Worker images bake their runtime user at build time. The coordinator
 # builds as root with HOST_UID/HOST_GID set; `sudo` sets SUDO_UID/SUDO_GID;
-# otherwise the invoking user is the host user.
-stage_worker() {
-    require_docker || return 1
-    local uid gid uid_args=()
+# otherwise the invoking user is the host user. Sets uid_args.
+declare -a uid_args=()
+set_uid_args() {
+    local uid gid
     uid="${HOST_UID:-${SUDO_UID:-$(id -u 2>/dev/null || echo 0)}}"
     gid="${HOST_GID:-${SUDO_GID:-$(id -g 2>/dev/null || echo 0)}}"
+    uid_args=()
     if [[ "${uid}" != 0 ]]; then
         uid_args=(--build-arg "WORKER_UID=${uid}" --build-arg "WORKER_GID=${gid}")
     else
         echo "  (worker user: building as root with no HOST_UID or SUDO_UID -- keeping the image default)" >&2
     fi
+}
+
+stage_worker() {
+    require_docker || return 1
+    set_uid_args
     docker build "${build_flags[@]}" "${uid_args[@]}" -t "${WORKER_IMAGE_NAME}" ./worker
+}
+
+# Example worker images: every examples/NAME/Dockerfile becomes
+# cicd-example-NAME, the name its .cicd-image refers to. They copy
+# the entrypoint from cicd-worker, so the worker stage builds first.
+stage_examples() {
+    require_docker || return 1
+    set_uid_args
+    local dir name image rc=0 found=0
+    for dir in examples/*/; do
+        [[ -f "${dir}Dockerfile" ]] || continue
+        found=1
+        name="$(basename "${dir}")"
+        image="cicd-example-${name}"
+        if docker build "${build_flags[@]}" "${uid_args[@]}" -t "${image}" "${dir}" \
+            && docker run --rm --network none --entrypoint true "${image}"; then
+            echo "  ${image}: built, starts" >&2
+        else
+            echo "  ${image}: build or start failed" >&2
+            rc=1
+        fi
+    done
+    [[ "${found}" -eq 1 ]] || echo "  (no examples/*/Dockerfile found)" >&2
+    return "${rc}"
 }
 
 stage_coordinator() {
@@ -118,9 +150,10 @@ for stage in "${stages[@]}"; do
         worker)      run_stage worker stage_worker ;;
         coordinator) run_stage coordinator stage_coordinator ;;
         verify)      run_stage verify stage_verify ;;
+        examples)    run_stage examples stage_examples ;;
         *)
             echo "error: unknown stage '${stage}'" >&2
-            echo "Usage: $0 [worker|coordinator|verify|all]" >&2
+            echo "Usage: $0 [worker|coordinator|verify|examples|all]" >&2
             exit 1
             ;;
     esac
